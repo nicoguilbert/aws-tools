@@ -1,18 +1,20 @@
 import json
 
+frequency = "rate(10 minute)"
+
+lambda_client = boto3.client('lambda')
+events_client = boto3.client('events')
+
+fn_name = "HelloWorld"
+fn_role = 'arn:aws:iam::728679744102:role/rds_copy_snapshot_regions'
+fn_arn = 'arn:aws:lambda:us-west-1:728679744102:function:HelloWorld'
+
 def lambda_handler(event, context):
     ##########
     # Invoke #
     ##########
-    
-    lambda_client = boto3.client('lambda')
-    events_client = boto3.client('events')
 
-    fn_name = "HelloWorld"
-    fn_role = 'arn:aws:iam::728679744102:role/rds_copy_snapshot_regions'
-    fn_arn = 'arn:aws:lambda:us-west-1:728679744102:function:HelloWorld'
     
-    frequency = "rate(1 minute)"
     name = "{0}-Trigger".format(fn_name)
     
     rule_response = events_client.put_rule(
