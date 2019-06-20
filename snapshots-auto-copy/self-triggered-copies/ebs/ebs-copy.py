@@ -24,7 +24,7 @@ EMAIL_RECIPIENT = "nicolasguilbert.tours@gmail.com"
 EMAIL_REGION = "us-west-2"
 
 SNS = boto3.resource('sns')
-EMAIL_TOPIC = shared_variables.EMAIL_TOPIC
+EMAIL_TOPIC = SNS.Topic('arn:aws:sns:us-west-1:728679744102:EmailsToSend')
 
 CLIENT_SOURCE = boto3.client('ec2',region_name=SOURCE_REGION)
 CLIENT_DEST = boto3.client('ec2', region_name=DEST_REGION)
