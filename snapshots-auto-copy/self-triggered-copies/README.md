@@ -204,10 +204,15 @@ Frequency | Expression
 
 *24 hours clock, so 6:00PM would be cron(0 18....)*
 
+Enable Trigger > Add
+
 ### Code
 
 Copy/Paste the code (trigger.py). Do not forget to change the global variables.
 
+### Save
+
+Once the function is changed the CloudWatch Event will start processing and will trigger this function when you decided to.
 
 
 
