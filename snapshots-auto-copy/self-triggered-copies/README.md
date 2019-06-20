@@ -57,6 +57,13 @@ This function needs a Role with at least these permissions :
         {
             "Effect": "Allow",
             "Action": [
+                "events:DisableRule"
+            ],
+            "Resource": "arn:aws:events:us-west-1:728679744102:rule/EbsSnapshotCopyCrossRegion-Trigger"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
                 "sns:Publish"
             ],
             "Resource": "arn:aws:sns:us-west-1:728679744102:EmailsToSend"
@@ -112,6 +119,13 @@ You change let unchanged the other parameters.
                 "rds:DeleteDbSnapshot"
             ],
             "Resource": "arn:aws:ec2:us-west-2:728679744102:*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "events:DisableRule"
+            ],
+            "Resource": "arn:aws:events:us-west-1:728679744102:rule/RdsSnapshotCopyCrossRegion-Trigger"
         },
         {
             "Effect": "Allow",
