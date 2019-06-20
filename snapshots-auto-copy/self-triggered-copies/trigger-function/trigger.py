@@ -11,11 +11,10 @@ def lambda_handler(event, context):
     rds_fn_name = "RdsSnapshotCopyCrossRegion"
     rds_fn_arn = 'arn:aws:lambda:us-west-1:728679744102:function:RdsSnapshotCopyCrossRegion'
     
-    frequency = "rate(1 minute)"
+    frequency = "rate(10 minutes)"
     ebs_name = "{0}-Trigger".format(ebs_fn_name)
     rds_name = "{0}-Trigger".format(rds_fn_name)
 
-     
     # EBS
     try:
         rule_response = events_client.put_rule(
