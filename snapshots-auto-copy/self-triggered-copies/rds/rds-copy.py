@@ -17,6 +17,11 @@ import json
 SOURCE_REGION = 'us-west-1'
 DEST_REGION = 'us-west-2'
 AWS_ACCOUNT = '728679744102'
+
+EMAIL_SENDER = "nicolasguilbert.tours@gmail.com"
+EMAIL_RECIPIENT = "nicolasguilbert.tours@gmail.com"
+EMAIL_REGION = "us-west-2"
+
 SNS = boto3.resource('sns')
 EMAIL_TOPIC = SNS.Topic('arn:aws:sns:us-west-1:728679744102:EmailsToSend')
 
@@ -75,17 +80,7 @@ def launch_copy_snapshots(snapshots, snap_type, copy_limit):
         # Automated => Name of database + Creation date (year-month-day)
         # Manual    => Name of the snapshot + Creation date 
         ###################################################################
-        
-        #########################################################
-        # Original
-        # copy_name = database + "-" + snapshot_name + "-" + snapshots[1].strftime("%Y-%m-%d")
-        #########################################################
-        # Why make the distinction between manual and automated?
-        # Automated snapshot will have colons in their names
-        # => TargetDBSnapshotIdentifier in the copy_db_snapshot
-        # method won't accept that
-        #########################################################
-        
+             
         if snap_type == "automated":
             copy_name = "sc-" + database + "-" + start_time.strftime("%Y-%m-%d-%Hh%Mm")
         elif snap_type == "manual":
