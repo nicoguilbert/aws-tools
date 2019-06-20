@@ -129,9 +129,19 @@ def launch_copy_snapshots(snapshots, snap_type, copy_limit):
             )
                 
             if response['DBSnapshot']['Status'] != "pending" and response['DBSnapshot']['Status'] != "available":
-                raise Exception("Copy operation for " + copy_name + " failed!")
-                print("Copied " + copy_name)
-                # Send e-mail !!
+                raise Exception("Copy operation for " + copy_name + " failed!")               
+                
+                send_email(
+                    subject = "An Rds Snapshot was not copied",
+                    message = """
+                            {
+                                "sender": "Sender Name  <%s>",
+                                "recipient":"%s",
+                                "aws_region":"%s",
+                                "body": "The copy process of the snapshot %s has failed."
+                            }
+                            """ % (EMAIL_SENDER, EMAIL_RECIPIENT, EMAIL_REGION, copy_name)
+                )
                 continue
         
             i = i + 1

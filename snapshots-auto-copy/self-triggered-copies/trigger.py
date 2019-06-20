@@ -71,7 +71,7 @@ def lambda_handler(event, context):
                 ]
             )
     except:
-        rule_response = events_client.enable_rule(
+        rds_rule_response = events_client.enable_rule(
             Name=rds_name
         )
         print("Rule already exists.") 
