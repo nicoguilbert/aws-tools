@@ -140,7 +140,7 @@ You change let unchanged the other parameters.
 
 http://asvignesh.in/aws-lambda-delete-old-ebs-snapshots-using-boto3/
 
-## TriggerCopyFunctions
+## TriggerSnapshotCopyFunctions
 
 Go to the AWS Console > Lambda.
 Click on "Create Function". Use the following parameters :
@@ -166,9 +166,20 @@ This function needs a Role with at least these permissions :
               "arn:aws:lambda:us-west-1:728679744102:function:RdsSnapshotCopyCrossRegion",
               "arn:aws:lambda:us-west-1:728679744102:function:EbsSnapshotCopyCrossRegion"
               ]
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "events:EnableRule",
+            ],
+            "Resource": "*"
           }
       ]
   },
 ```
+
+### CloudWatch Event trigger
+
+
 
 
