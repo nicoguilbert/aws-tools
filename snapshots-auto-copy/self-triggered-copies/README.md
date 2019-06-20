@@ -53,11 +53,67 @@ This function needs a Role with at least these permissions :
                 "ec2:DeleteSnapshot"
             ],
             "Resource": "arn:aws:ec2:us-west-2:728679744102:*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "sns:Publish"
+            ],
+            "Resource": "arn:aws:sns:us-west-1:728679744102:EmailsToSend"
         }
     ]
 }
 ```
 
+Permissions > Create role with basic Lambda permissions > Create Function
+In the dashboard of the function : Execution Role > View the {...} role > Add Inline policy > JSON > *CopyPaste these permissions*
+
+### Paste the code
+
+
+## RdsSnapshotCopyCrossRegion
+
+```
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+            ],
+            "Resource": "arn:aws:logs:*:*:*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "rds:DescribeDbSnapshots",
+                "rds:CopyDbSnapshot",
+                "rds:DescribeDbClusters",
+                "rds:DescribeDbClusterSnapshots",
+                "rds:CopyDbClusterSnapshot"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "rds:DeleteDbSnapshot"
+            ],
+            "Resource": "arn:aws:ec2:us-west-2:728679744102:*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "sns:Publish"
+            ],
+            "Resource": "arn:aws:sns:us-west-1:728679744102:EmailsToSend"
+        }
+    ]
+}
+```
 
 http://asvignesh.in/aws-lambda-delete-old-ebs-snapshots-using-boto3/
 
