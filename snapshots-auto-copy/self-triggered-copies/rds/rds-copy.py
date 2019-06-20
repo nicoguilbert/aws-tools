@@ -10,15 +10,6 @@ import operator
 import re
 import json
 
-
-######################################################################################
-# Boto3 documentation.
-# https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html
-######################################################################################
-# Original function (lot of typos like double quotes missing)
-# https://timesofcloud.com/aws-lambda-copy-5-snapshots-between-region/
-######################################################################################
-
 ######################
 #  Global variables. #
 ######################
@@ -36,6 +27,15 @@ RETENTION_TIME = DAYS_OF_RETENTION * 86400
 CLIENT_DB_SOURCE = boto3.client("rds", region_name=SOURCE_REGION)
 CLIENT_DB_DEST = boto3.client("rds", region_name=DEST_REGION)
 CLIENT_LAMBDA = boto3.client("lambda", region_name=SOURCE_REGION)
+
+######################################################################################
+# Boto3 documentation.
+# https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html
+######################################################################################
+# Original function (lot of typos like double quotes missing)
+# https://timesofcloud.com/aws-lambda-copy-5-snapshots-between-region/
+######################################################################################
+
 
 def get_snapshots(client, type):
     # DOES NOT WORK FOR AURORA ! ! !
