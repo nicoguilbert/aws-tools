@@ -46,10 +46,8 @@ This function needs a Role with at least these permissions :
               "
               ]
           }
-        ]
-      },
-        ]
-   },
+      ]
+  },
 ```
 
 
