@@ -283,8 +283,7 @@ def copy_snapshot(snapshot_id, tags):
 #################################################
 
 def delete_old_snapshots():
-    
-    response = client.describe_snapshots(
+    response = CLIENT_DEST.describe_snapshots(
         Filters=[
             {
                 'Name': 'status',
@@ -338,6 +337,7 @@ def lambda_handler(event, context):
         print "Already 5 snapshots being copied."
         exit(0)
     
+    '''
     EMAIL_TOPIC.publish(
                 Subject = "From SES: EBS Test",
                 Message = """
@@ -349,12 +349,24 @@ def lambda_handler(event, context):
                         }
                         """ % (EMAIL_SENDER, EMAIL_RECIPIENT, EMAIL_REGION)
                 )
-                
+    
+    '''      
+    
     copy_limit = 5 - nb_copy
     
     snapshots = get_snapshots(CLIENT_SOURCE)
     snapshot_list = get_snapshot_list(snapshots)
     
+    if snapshot_list == []:
+        print context
+        print event
+        events_client = boto3.client('events')
+        response = events_client.disable_rule(
+            Name="{0}-Trigger".format(context.function_name)
+        )
+        print "Rule disabled. No more snapshots to copy"
+        exit(0)
+        
     i = 0
 
     for snapshort in snapshot_list:
