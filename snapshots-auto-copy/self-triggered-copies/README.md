@@ -87,6 +87,8 @@ Set the timeout to 1 minute. The usual duration of the function is less than 30 
 
 You change let unchanged the other parameters.
 
+http://asvignesh.in/aws-lambda-delete-old-ebs-snapshots-using-boto3/
+
 ## RdsSnapshotCopyCrossRegion
 
 ```
@@ -138,7 +140,17 @@ You change let unchanged the other parameters.
 }
 ```
 
-http://asvignesh.in/aws-lambda-delete-old-ebs-snapshots-using-boto3/
+### Code
+
+Copy/Paste the code (rds-copy.py). Do not forget to change the global variables.
+
+### Timeout
+
+Set the timeout to 1 minute. The usual duration of the function is less than 30 seconds.
+
+### The other parameters
+
+You change let unchanged the other parameters.
 
 ## TriggerSnapshotCopyFunctions
 
@@ -150,6 +162,7 @@ Function Name   |  Runtime
 TriggerCopyFunctions | Python 3.7
 
 ### Role
+
 This function needs a Role with at least these permissions :
 
 ```
@@ -179,6 +192,23 @@ This function needs a Role with at least these permissions :
 ```
 
 ### CloudWatch Event trigger
+
+In the function Dashboard > Designer (probably the main window already opened) > Add Trigger > CloudWatch Events.
+Scroll down Rule > Create a new rule > *Pick a rule name* > *Pick a rule description* > Schedule Expression
+
+Example : 
+
+Frequency | Expression
+----------|------------
+10:15 AM (UTC) every day | cron(15 10 \* \* ? \*)
+
+*24 hours clock, so 6:00PM would be cron(0 18....)*
+
+### Code
+
+Copy/Paste the code (trigger.py). Do not forget to change the global variables.
+
+
 
 
 
