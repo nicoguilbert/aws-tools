@@ -7,14 +7,6 @@ import boto3
 import time
 import datetime
 
-######################################################################################
-# Boto3 documentation.
-# https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html
-######################################################################################
-# Original function (lot of typos like double quotes missing)
-# https://timesofcloud.com/aws-lambda-copy-5-snapshots-between-region/
-######################################################################################
-
 ######################
 #  Global variables. #
 ######################
@@ -30,6 +22,31 @@ RETENTION_TIME = DAYS_OF_RETENTION * 86400
 CLIENT_SOURCE = boto3.client('ec2',region_name=SOURCE_REGION)
 CLIENT_DEST = boto3.client('ec2', region_name=DEST_REGION)
 EC2_RESOURCE = boto3.resource('ec2')
+
+######################################################################################
+# Boto3 documentation.
+# https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html
+######################################################################################
+# Original function (lot of typos like double quotes missing)
+# https://timesofcloud.com/aws-lambda-copy-5-snapshots-between-region/
+######################################################################################
+
+# Returns the number of snapshots being copied at the moment
+def get_nb_copy(client):
+    response = client.describe_snapshots(
+        Filters=[
+            {
+                'Name': 'status',
+                'Values': [
+                    'pending'
+                ]
+            }
+        ],
+        OwnerIds=[
+            AWS_ACCOUNT,
+        ],
+    )
+    return len(response["Snapshots"])
 
 ##############################################
 # Gets all snapshots as per specified filter #
