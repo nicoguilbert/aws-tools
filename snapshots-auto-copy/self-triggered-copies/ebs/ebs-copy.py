@@ -19,6 +19,13 @@ AWS_ACCOUNT = '728679744102'
 DAYS_OF_RETENTION = 14
 RETENTION_TIME = DAYS_OF_RETENTION * 86400
 
+EMAIL_SENDER = "nicolasguilbert.tours@gmail.com"
+EMAIL_RECIPIENT = "nicolasguilbert.tours@gmail.com"
+EMAIL_REGION = "us-west-2"
+
+SNS = boto3.resource('sns')
+EMAIL_TOPIC = shared_variables.EMAIL_TOPIC
+
 CLIENT_SOURCE = boto3.client('ec2',region_name=SOURCE_REGION)
 CLIENT_DEST = boto3.client('ec2', region_name=DEST_REGION)
 EC2_RESOURCE = boto3.resource('ec2')
@@ -331,6 +338,18 @@ def lambda_handler(event, context):
         print "Already 5 snapshots being copied."
         exit(0)
     
+    EMAIL_TOPIC.publish(
+                Subject = "From SES: EBS Test",
+                Message = """
+                        {
+                            "sender": "Sender Name  <%s>",
+                            "recipient":"%s",
+                            "aws_region":"%s",
+                            "body": "Snapshots copy issue"
+                        }
+                        """ % (EMAIL_SENDER, EMAIL_RECIPIENT, EMAIL_REGION)
+                )
+                
     copy_limit = 5 - nb_copy
     
     snapshots = get_snapshots(CLIENT_SOURCE)
