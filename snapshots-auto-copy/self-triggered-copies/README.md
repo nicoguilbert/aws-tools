@@ -68,8 +68,17 @@ This function needs a Role with at least these permissions :
 Permissions > Create role with basic Lambda permissions > Create Function
 In the dashboard of the function : Execution Role > View the {...} role > Add Inline policy > JSON > *CopyPaste these permissions*
 
-### Paste the code
+### Code
 
+Copy/Paste the code (ebs-copy.py). Do not forget to change the global variables.
+
+### Timeout
+
+Set the timeout to 1 minute. The usual duration of the function is less than 30 seconds.
+
+### The other parameters
+
+You change let unchanged the other parameters.
 
 ## RdsSnapshotCopyCrossRegion
 
