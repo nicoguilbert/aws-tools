@@ -41,7 +41,13 @@ CLIENT_LAMBDA = boto3.client("lambda", region_name=SOURCE_REGION)
 # https://timesofcloud.com/aws-lambda-copy-5-snapshots-between-region/
 ######################################################################################
 
-
+def send_email(subject, message):
+    print ("Sending email.")
+    EMAIL_TOPIC.publish(
+                Subject = subject,
+                Message = message
+            )
+            
 def get_snapshots(client, type):
     # DOES NOT WORK FOR AURORA ! ! !
     response = client.describe_db_snapshots(
@@ -80,7 +86,7 @@ def launch_copy_snapshots(snapshots, snap_type, copy_limit):
         # Automated => Name of database + Creation date (year-month-day)
         # Manual    => Name of the snapshot + Creation date 
         ###################################################################
-             
+        
         if snap_type == "automated":
             copy_name = "sc-" + database + "-" + start_time.strftime("%Y-%m-%d-%Hh%Mm")
         elif snap_type == "manual":
@@ -178,15 +184,8 @@ def lambda_handler(event, context):
     delete_old_snapshots(snapshots_automated, "automated")
     ####################################################
     
-    if snapshots_automated == [] and snapshots_manual == []:
-        events_client = boto3.client('events')
-        response = events_client.disable_rule(
-            Name="{0}-Trigger".format(context.function_name)
-        )
-        print "Rule disabled. No more snapshots to copy"
-        exit(0)
-    
-    copy_limit = 5 - get_nb_copy(CLIENT_DB_DEST)
+    nb_copy = get_nb_copy(CLIENT_DB_DEST)
+    copy_limit = 5 - nb_copy
     if (copy_limit <= 0):
         exit(0)
 
@@ -204,3 +203,21 @@ def lambda_handler(event, context):
     info = launch_copy_snapshots(snapshots_automated, "automated", copy_limit)
     ####################################################
     
+    if copy_limit == 5 - nb_copy:
+        events_client = boto3.client('events')
+        response = events_client.disable_rule(
+            Name="{0}-Trigger".format(context.function_name)
+        )
+        print ("Rule disabled. No more snapshots to copy")
+        send_email(
+                subject = "Rds Snapshot Copy finished",
+                message = """
+                    {
+                        "sender": "Sender Name  <%s>",
+                        "recipient":"%s",
+                        "aws_region":"%s",
+                        "body": "The copy process of RDS snapshots has just ended."
+                    }
+                """ % (EMAIL_SENDER, EMAIL_RECIPIENT, EMAIL_REGION)
+        )
+        exit(0)

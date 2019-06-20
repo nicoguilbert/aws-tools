@@ -11,10 +11,11 @@ def lambda_handler(event, context):
     rds_fn_name = "RdsSnapshotCopyCrossRegion"
     rds_fn_arn = 'arn:aws:lambda:us-west-1:728679744102:function:RdsSnapshotCopyCrossRegion'
     
-    frequency = "rate(10 minutes)"
+    frequency = "rate(2 minutes)"
     ebs_name = "{0}-Trigger".format(ebs_fn_name)
     rds_name = "{0}-Trigger".format(rds_fn_name)
 
+     
     # EBS
     try:
         rule_response = events_client.put_rule(
@@ -47,7 +48,7 @@ def lambda_handler(event, context):
     
     # RDS
     try:
-        rule_response = events_client.put_rule(
+        rds_rule_response = events_client.put_rule(
             Name=rds_name,
             ScheduleExpression=frequency,
             State='ENABLED',
@@ -58,21 +59,19 @@ def lambda_handler(event, context):
             StatementId="{0}-Event".format(rds_name),
             Action='lambda:InvokeFunction',
             Principal='events.amazonaws.com',
-            SourceArn=rule_response['RuleArn'],
+            SourceArn=rds_rule_response['RuleArn'],
         )
         events_client.put_targets(
             Rule=rds_name,
-            Targets=[
+                Targets=[
                 {
-                    'Id': "1",
+                    'Id': "2",
                     'Arn': rds_fn_arn,
                 },
-            ]
-        )
+                ]
+            )
     except:
         rule_response = events_client.enable_rule(
             Name=rds_name
         )
         print("Rule already exists.") 
-        
-    

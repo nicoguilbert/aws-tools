@@ -1,6 +1,6 @@
 ################################################################
 # This script copies every snapshot from us-west-2 to us-west-1
-# Python 2.7 only
+# Python 3.7
 ################################################################
 
 import boto3
@@ -38,6 +38,13 @@ EC2_RESOURCE = boto3.resource('ec2')
 # https://timesofcloud.com/aws-lambda-copy-5-snapshots-between-region/
 ######################################################################################
 
+def send_email(subject, message):
+    print ("Sending email.")
+    EMAIL_TOPIC.publish(
+                Subject = subject,
+                Message = message
+            )
+    
 # Returns the number of snapshots being copied at the moment
 def get_nb_copy(client):
     response = client.describe_snapshots(
@@ -137,7 +144,7 @@ def get_volume_attachments(volume_id):
             ],
         )
     except:
-        print "The volume '" + volume_id + "' cannot be found. Must have been deleted"
+        print ("The volume '" + volume_id + "' cannot be found. Must have been deleted")
         volume_exists = False
     
     if volume_exists == True:
@@ -198,7 +205,7 @@ def get_volume_description(snapshot_id):
 ####################################################
 
 def delete_tag(client, snapshot_id, key, value):
-    print "Deleting tag - " + key + ":" + value + ", snapshot_id: " + snapshot_id
+    print ("Deleting tag - " + key + ":" + value + ", snapshot_id: " + snapshot_id)
     client.delete_tags(
         Resources=[snapshot_id],
         Tags=[
@@ -210,7 +217,7 @@ def delete_tag(client, snapshot_id, key, value):
     )
 
 def create_tag(client, snapshot_id, key, value):
-    print "Creating tag - " + key + ":" + value + ", snapshot_id: " + snapshot_id
+    print ("Creating tag - " + key + ":" + value + ", snapshot_id: " + snapshot_id)
     client.create_tags(
         Resources=[snapshot_id],
         Tags=[
@@ -226,7 +233,7 @@ def create_tag(client, snapshot_id, key, value):
 ###############################################
 
 def copy_snapshot(snapshot_id, tags):
-    print "Started copying.. snapshot_id: " + snapshot_id + ", from: " + SOURCE_REGION + ", to: " + DEST_REGION
+    print ("Started copying.. snapshot_id: " + snapshot_id + ", from: " + SOURCE_REGION + ", to: " + DEST_REGION)
     description = get_volume_description(snapshot_id)
 
     try:
@@ -237,11 +244,22 @@ def copy_snapshot(snapshot_id, tags):
             DryRun=False
         )
 
-    except Exception, e:
-        raise e
+    except:
+        send_email(
+                subject = "An EBS Snapshot not copied",
+                message = """
+                    {
+                        "sender": "Sender Name  <%s>",
+                        "recipient":"%s",
+                        "aws_region":"%s",
+                        "body": "The snapshot %s encountered  problem during the copy process. The copy did not succeed."
+                    }
+                """ % (EMAIL_SENDER, EMAIL_RECIPIENT, EMAIL_REGION, snapshot_id)
+        )
+        
 
     new_snapshot_id = copy_response["SnapshotId"]
-    print 'new_snapshot_id : ' + new_snapshot_id
+    print ('new_snapshot_id : ' + new_snapshot_id)
     old_snapshot = EC2_RESOURCE.Snapshot(snapshot_id)
     new_snapshot = EC2_RESOURCE.Snapshot(new_snapshot_id)
     
@@ -253,8 +271,8 @@ def copy_snapshot(snapshot_id, tags):
         )
     except:
         create_tag(CLIENT_DEST, new_snapshot_id, 'IssueWithTags', 'Colon')
-        print "This snapshot might contain tags starting by 'aws:'. No way to handle them now."
-        print new_snapshot_id
+        print ("This snapshot might contain tags starting by 'aws:'. No way to handle them now.")
+        print (new_snapshot_id)
     
     
     name = get_snapshot_name(snapshot_id)
@@ -271,7 +289,7 @@ def copy_snapshot(snapshot_id, tags):
     create_tag(CLIENT_DEST, new_snapshot_id, 'SnapshotType', 'AutomatedCopyCrossRegion')
     create_tag(CLIENT_DEST, new_snapshot_id, 'OriginalSnapshotID', snapshot_id)
     
-    print "Successfully copyied.. snapshot_id: " + snapshot_id + ", from: " + SOURCE_REGION + ", to: " + DEST_REGION
+    print("Successfully copyied.. snapshot_id: " + snapshot_id + ", from: " + SOURCE_REGION + ", to: " + DEST_REGION)
     
     delete_tag(CLIENT_SOURCE, snapshot_id, 'BackupCrossRegion', 'Waiting')
     create_tag(CLIENT_SOURCE, snapshot_id, 'BackupCrossRegion', 'Done')
@@ -311,7 +329,6 @@ def delete_old_snapshots():
         snap = resource.Snapshot(snapshot_id)
         delete_time = datetime.datetime.now() - datetime.timedelta(seconds=RETENTION_TIME)
         
-        print snapshot_id
         # These two lines are used to make sure we can compare both dates.
         start_time = snap.start_time.replace(tzinfo=None)
         delete_time = delete_time.replace(tzinfo=None)
@@ -319,11 +336,11 @@ def delete_old_snapshots():
         # If the snapshot is too old, we delete it. Godspeed, snapshot.
         try:
             if start_time < delete_time:
-                print "## => Deletion time"
+                print ("## => Deletion time")
                 snap.delete()
-                print "## <= Deletion over"
+                print ("## <= Deletion over")
         except:
-            print "This snapshot was probably 'InUse' by an Image. Won't be deleted."
+            print ("This snapshot was probably 'InUse' by an Image. Won't be deleted.")
 
 
 #################################
@@ -334,23 +351,8 @@ def lambda_handler(event, context):
     nb_copy = get_nb_copy(CLIENT_DEST)
     
     if nb_copy >= 5:
-        print "Already 5 snapshots being copied."
+        print ("Already 5 snapshots being copied.")
         exit(0)
-    
-    '''
-    EMAIL_TOPIC.publish(
-                Subject = "From SES: EBS Test",
-                Message = """
-                        {
-                            "sender": "Sender Name  <%s>",
-                            "recipient":"%s",
-                            "aws_region":"%s",
-                            "body": "Snapshots copy issue"
-                        }
-                        """ % (EMAIL_SENDER, EMAIL_RECIPIENT, EMAIL_REGION)
-                )
-    
-    '''      
     
     copy_limit = 5 - nb_copy
     
@@ -358,13 +360,22 @@ def lambda_handler(event, context):
     snapshot_list = get_snapshot_list(snapshots)
     
     if snapshot_list == []:
-        print context
-        print event
         events_client = boto3.client('events')
         response = events_client.disable_rule(
             Name="{0}-Trigger".format(context.function_name)
         )
-        print "Rule disabled. No more snapshots to copy"
+        print ("Rule disabled. No more snapshots to copy")
+        send_email(
+                subject = "EBS Snapshot Copy finished",
+                message = """
+                    {
+                        "sender": "Sender Name  <%s>",
+                        "recipient":"%s",
+                        "aws_region":"%s",
+                        "body": "The copy process of EBS snapshots has just ended."
+                    }
+                """ % (EMAIL_SENDER, EMAIL_RECIPIENT, EMAIL_REGION)
+        )
         exit(0)
         
     i = 0
@@ -373,7 +384,7 @@ def lambda_handler(event, context):
         # 5 is the number of snapshot copies you can make at the same time on AWS
         if i < copy_limit:
             snapshot_id = snapshort[0]
-            print 'copied snapshot id =' + snapshot_id 
+            print ('copied snapshot id =' + snapshot_id)
             tags = snapshort[1]
             description = get_volume_description(snapshot_id)
             new_snapshot_id = copy_snapshot(snapshot_id, tags)
@@ -382,6 +393,6 @@ def lambda_handler(event, context):
             break
     
     if i == 0:
-        print "No snapshots to copy at this call of the function"
+        print ("No snapshots to copy at this call of the function")
 
     delete_old_snapshots()

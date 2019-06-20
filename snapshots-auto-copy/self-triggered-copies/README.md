@@ -15,7 +15,7 @@ Click on "Create Function". Use the following parameters :
 
 Function Name   |  Runtime
 --------------------|-------------
-EbsSnapshotCopyCrossRegion | Python 2.7
+EbsSnapshotCopyCrossRegion | Python 3.7
 
 ### Role
 
