@@ -47,7 +47,7 @@ def get_nb_copy(client):
         ],
     )
     return len(response["Snapshots"])
-
+    
 ##############################################
 # Gets all snapshots as per specified filter #
 ##############################################
@@ -70,7 +70,6 @@ def get_snapshots(client):
     return response["Snapshots"]
 
 
-#Creating a list of snapshot_id and respective tags
 def get_snapshot_list(snapshots):
     snapshot_list = []
     
@@ -81,31 +80,19 @@ def get_snapshot_list(snapshots):
         snap = resource.Snapshot(snapshot_id)
         
         start_time = snap.start_time.replace(tzinfo=None)
-
-        ################################
-        # > print "snapshot["Tags"] = "
-        # > print snapshot["Tags"]
-        # > [
-        #        {u'Value': 'Done', u'Key': 'BackupCrossRegion'}, 
-        #        {...}, 
-        #        {...}
-        #        ...
-        #   ] 
-        #
-        # Next 'if' will test 2 things:
-        # 1) If the snapshot has any tag at all.
-        # 2) If the key "BackupCrossRegion" already exists. 
-        # If those two conditions are False it creates a tag BackupCrossRegion : Waiting
-        # It's important that all the snapshots have this tag
-        # https://stackoverflow.com/questions/8653516/python-list-of-dictionaries-search
-        ################################
-
-        if ("Tags" not in snapshot.keys()) or (next((item for item in snapshot["Tags"] if item["Key"] == "BackupCrossRegion"), False) == False):
-            create_tag(CLIENT_SOURCE, snapshot_id, 'BackupCrossRegion', 'Waiting')
         
-        tags = snapshot["Tags"]
+        # if there's no tags    
+        if ('Tags' not in snapshot.keys()):
+            create_tag(CLIENT_SOURCE, snapshot_id, 'BackupCrossRegion', 'Waiting')
+            tags = [{"Key":"BackupCrossRegion", "Value":"Waiting"}]
+        # if there's no BackupCrossRegion tag
+        else:
+            if (next((item for item in snapshot['Tags'] if item['Key'] == 'BackupCrossRegion'), False) == False):
+                create_tag(CLIENT_SOURCE, snapshot_id, 'BackupCrossRegion', 'Waiting')
+            tags = snapshot["Tags"]
+            
         for t in tags:
-            if t["Key"] == "BackupCrossRegion" and t["Value"] == "Done":
+            if t['Key'] == 'BackupCrossRegion' and t['Value'] == 'Done':
                 copyIsDone = True
         
         if copyIsDone == False:
@@ -338,6 +325,14 @@ def delete_old_snapshots():
 #################################
 
 def lambda_handler(event, context):
+    nb_copy = get_nb_copy(CLIENT_DEST)
+    
+    if nb_copy >= 5:
+        print "Already 5 snapshots being copied."
+        exit(0)
+    
+    copy_limit = 5 - nb_copy
+    
     snapshots = get_snapshots(CLIENT_SOURCE)
     snapshot_list = get_snapshot_list(snapshots)
     
@@ -345,8 +340,7 @@ def lambda_handler(event, context):
 
     for snapshort in snapshot_list:
         # 5 is the number of snapshot copies you can make at the same time on AWS
-        print i
-        if i < 5:
+        if i < copy_limit:
             snapshot_id = snapshort[0]
             print 'copied snapshot id =' + snapshot_id 
             tags = snapshort[1]
@@ -354,7 +348,7 @@ def lambda_handler(event, context):
             new_snapshot_id = copy_snapshot(snapshot_id, tags)
             i = i + 1
         else:
-            exit(0)
+            break
     
     if i == 0:
         print "No snapshots to copy at this call of the function"
