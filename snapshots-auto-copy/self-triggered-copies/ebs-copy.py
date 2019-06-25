@@ -6,6 +6,183 @@
 import boto3
 import time
 import datetime
+import re
+from datetime import datetime, timedelta, timezone
+
+import boto3
+
+class Ec2Instances(object):
+    
+    def __init__(self, region_source, region_dest):
+        self.region_source = region_source
+        self.region_dest = region_dest
+        self.aws_account = '728679744102'
+        self.ec2_source = boto3.client('ec2', region_name=region_source)
+        self.ec2_dest = boto3.client('ec2', region_name=region_dest)
+        self.sns = boto3.resource('sns')
+        self.snapshots = []
+
+    def send_email(self, subject, message):
+        print ("Sending email.")
+        email_topic = self.sns.Topic('arn:aws:sns:us-west-1:728679744102:EmailsToSend')
+        self.email_topic.publish(
+                Subject = subject,
+                Message = message
+            )
+
+    def get_nb_copy(self):
+        response = self.ec2_dest.describe_snapshots(
+            Filters=[{ 'Name': 'status', 'Values': ['pending', 'creating' ]} ],
+            OwnerIds=[ 
+                self.aws_account, 
+            ],
+        )
+        return len(response["Snapshots"])
+
+    def get_snapshots(self):
+        response = self.ec2_source.describe_snapshots(
+            Filters=[{ 'Name': 'status', 'Values': ['completed']}],
+            OwnerIds=[
+                self.aws_account,
+            ],
+        )
+        return response["Snapshots"]
+
+
+    def set_snapshots_list(self):
+        n = 0
+        snapshots = self.get_snapshots()       
+        
+        for snapshot in snapshots:
+            s = Snapshot(self.ec2_source, snapshot["SnapshotId"])
+            already_copied = s.filter_snapshot()        
+        
+        if already_copied == False:
+            self.snapshots.append(s)
+            n = n + 1
+        
+        self.snapshot.sort(key=lambda r:r.start_time, reverse=True)
+        print(str(n) + "EBS snapshots to copy from " + region_source)
+        return n
+
+
+
+    # deletion
+    def get_autocopied_snapshots(self):
+        snapshots = self.ec2.describe_snapshots(
+            Filters=[{ 'Name': 'tag:SnapshotType', 'Values': 'AutomatedCopyCrossRegion' }],
+            OwnerIds=[ 
+                self.aws_account, 
+            ],
+        )
+        return snapshots
+
+    def delete_snapshot(self, snapshot_id):
+        self.ec2.delete_snapshot(SnapshotId=snapshot_id)
+    
+    def delete_snapshots(self, older_days=14):
+        delete_snapshots_num = 0
+        snapshots = self.get_autocopied_snapshots()
+        for snapshot in snapshots['Snapshots']:
+            fmt_start_time = snapshot['StartTime']
+            if (fmt_start_time < self.get_delete_data(older_days)):
+                self.delete_snapshot(snapshot['SnapshotId'])
+                delete_snapshots_num + 1
+        return delete_snapshots_num
+
+    def get_delete_data(self, older_days):
+        delete_time = datetime.now(tz=timezone.utc) - timedelta(days=older_days)
+        return delete_time;
+
+
+class Snapshot(object):
+
+    def __init__(self, ec2_client, snapshot_id):
+        self.ec2 = ec2_client
+        self.snapshot = ec2_client.Snapshot(snapshot_id) 
+        self.id = self.snapshot.snapshot_id
+        self.volume_id = self.snapshot.volume_id
+        self.description = self.snapshot.description
+        self.start_time = self.snapshot.start_time
+        self.tags = self.snapshot.tags
+        self.instance_name = ""
+        self.
+
+
+    def create_tag(self, key, value):
+        print ("Creatin tag - " + key + ":" + value + ", snapshot_id: " + self.id)
+        self.ec2.create_tags(
+            Resources=[ self.id ], 
+            Tags=[{'Key': key, 'Value':value},] 
+        )
+        self.tags.append({'Key': key, 'Value':value})
+
+    def delete_tag(self, key, value):
+        print ("Deleting tag - " + key + ":" + value + ", snapshot_id: " + self.id)
+        self.ec2.delete_tags(
+            Resources=[ self.id ], 
+            Tags=[{'Key': key, 'Value':value},] 
+        )
+        self.tags = [t for t in self.tags if not (t['Key'] == key and t['Value'] == value)]
+
+    def set_tags(self):
+        if self.tags == []:
+            self.create_tag("BackupCrossRegion", "Waiting")
+        
+        if (next((item for item in self.tags if item['Key'] == 'BackupCrossRegion'), False) == False):
+                self.create_tag(CLIENT_SOURCE, snapshot_id, 'BackupCrossRegion', 'Waiting')
+    
+    def filter_snapshot(self):
+        pattern = re.compile("^sc-")
+
+        self.set_tags()
+        
+        for t in self.tags:
+            # If the Name matches the pattern of copied snapshots
+            if t['Key'] == 'Name':
+                test_match = pattern.match(t['Value'])
+                if test_match == None:
+                    return True
+            # If the snapshot has already been copied
+            if t['Key'] == 'BackupCrossRegion' and t['Value'] == 'Done':
+                return True
+
+        return False
+    
+    def get_volume_attachments(self, volume_id):
+        try:
+            response = self.ec2_source.describe_volumes( 
+                VolumeIds=[ volume_id, ],
+            )
+            volume = ec2_source.Volume(volume_id)
+            return volume.attachments
+        except:
+            print ("The volume '" + volume_id + "' cannot be found. Must have been deleted.")
+            return False
+
+    def set_instance_name(instance_id):
+        instance = ec2_source.Instance(instance_id)
+        
+        for tag in instance.tags:
+            if tag["Key"] == "Name":
+                self.instance_name = tag["Value"]
+
+        self.instance_name = "NameUndefined"
+
+
+
+            
+def lambda_handler(event, context):
+    print("event " + str(event))
+    print("context " + str(context))
+    ec2_reg = boto3.client('ec2')
+    regions = ec2_reg.describe_regions()
+    for region in regions['Regions']:
+        region_name = region['RegionName']
+        instances = Ec2Instances(region_name)
+        deleted_counts = instances.delete_snapshots(1)
+        print("deleted_counts for region "+ str(region_name) +" is " + str(deleted_counts))
+    return 'completed'
 
 ######################
 #  Global variables. #
@@ -13,7 +190,6 @@ import datetime
 
 SOURCE_REGION = 'us-west-1'
 DEST_REGION = 'us-west-2'
-AWS_ACCOUNT = '728679744102'
 
 # How many days do you want to keep the snapshots
 DAYS_OF_RETENTION = 14
@@ -23,11 +199,6 @@ EMAIL_SENDER = "nicolasguilbert.tours@gmail.com"
 EMAIL_RECIPIENT = "nicolasguilbert.tours@gmail.com"
 EMAIL_REGION = "us-west-2"
 
-SNS = boto3.resource('sns')
-EMAIL_TOPIC = SNS.Topic('arn:aws:sns:us-west-1:728679744102:EmailsToSend')
-
-CLIENT_SOURCE = boto3.client('ec2',region_name=SOURCE_REGION)
-CLIENT_DEST = boto3.client('ec2', region_name=DEST_REGION)
 EC2_RESOURCE = boto3.resource('ec2')
 
 ######################################################################################
@@ -38,130 +209,13 @@ EC2_RESOURCE = boto3.resource('ec2')
 # https://timesofcloud.com/aws-lambda-copy-5-snapshots-between-region/
 ######################################################################################
 
-def send_email(subject, message):
-    print ("Sending email.")
-    EMAIL_TOPIC.publish(
-                Subject = subject,
-                Message = message
-            )
     
-# Returns the number of snapshots being copied at the moment
-def get_nb_copy(client):
-    response = client.describe_snapshots(
-        Filters=[
-            {
-                'Name': 'status',
-                'Values': [
-                    'pending'
-                ]
-            }
-        ],
-        OwnerIds=[
-            AWS_ACCOUNT,
-        ],
-    )
-    return len(response["Snapshots"])
-    
-##############################################
-# Gets all snapshots as per specified filter #
-##############################################
-
-def get_snapshots(client):
-    response = client.describe_snapshots(
-        Filters=[
-            {
-                'Name': 'status',
-                'Values': [
-                    'completed'
-                ]
-            }
-        ],
-        OwnerIds=[
-            AWS_ACCOUNT,
-        ],
-    )
-
-    return response["Snapshots"]
 
 
-def get_snapshot_list(snapshots):
-    snapshot_list = []
-    
-    for snapshot in snapshots:  
-        copyIsDone = False 
-        snapshot_id = snapshot["SnapshotId"]
-        resource = boto3.resource('ec2', region_name=SOURCE_REGION)
-        snap = resource.Snapshot(snapshot_id)
-        
-        start_time = snap.start_time.replace(tzinfo=None)
-        
-        # if there's no tags    
-        if ('Tags' not in snapshot.keys()):
-            create_tag(CLIENT_SOURCE, snapshot_id, 'BackupCrossRegion', 'Waiting')
-            tags = [{"Key":"BackupCrossRegion", "Value":"Waiting"}]
-        # if there's no BackupCrossRegion tag
-        else:
-            if (next((item for item in snapshot['Tags'] if item['Key'] == 'BackupCrossRegion'), False) == False):
-                create_tag(CLIENT_SOURCE, snapshot_id, 'BackupCrossRegion', 'Waiting')
-            tags = snapshot["Tags"]
-            
-        for t in tags:
-            if t['Key'] == 'BackupCrossRegion' and t['Value'] == 'Done':
-                copyIsDone = True
-        
-        if copyIsDone == False:
-            snapshot_list.append((snapshot_id, tags, start_time))
-    
-    # snapshot_list <=> [ (id, [tags], start_time), (id,...), ...]
-    # Next line sorts the list by creation time
-    snapshot_list.sort(key=lambda r:r[2], reverse=True)
-    
-    return snapshot_list
 
-##########################################################
-# The next 4 functions are used to get informations about 
-# the EC2 instance and the EBS volume, if they do exist.
-##########################################################
 
-# Returns the ID of the volume related to the snapshot
-def get_volume_id(snapshot_id):
-    snapshot = EC2_RESOURCE.Snapshot(snapshot_id)    
-    return snapshot.volume_id
 
-################################################################
-# Returns a list of information (python dictionnaries) about the 
-# volume attachments :
-# AttachTime (datetime), Device (string - name of the device)
-# InstanceId (string), State (string),
-# VolumeId (string), DeleteOnTermination (boolean)
-################################################################
-def get_volume_attachments(volume_id):
-    volume_exists = True
-    try:
-        response = CLIENT_SOURCE.describe_volumes(
-            VolumeIds=[
-                volume_id,
-            ],
-        )
-    except:
-        print ("The volume '" + volume_id + "' cannot be found. Must have been deleted")
-        volume_exists = False
-    
-    if volume_exists == True:
-        volume = EC2_RESOURCE.Volume(volume_id)
-        return volume.attachments
-    else:
-        return False
 
-def get_instance_name(instance_id):
-    instance = EC2_RESOURCE.Instance(instance_id)
-        
-    for tag in instance.tags:
-        #print tag
-        if tag["Key"] == "Name":
-            return tag["Value"]
-
-    return "NameUndefined"
 
 def get_snapshot_name(snapshot_id):
     snapshot = EC2_RESOURCE.Snapshot(snapshot_id)
@@ -199,34 +253,6 @@ def get_volume_description(snapshot_id):
 
     return description
 
-
-####################################################
-# Simple functions helping creating/deletinig tags #
-####################################################
-
-def delete_tag(client, snapshot_id, key, value):
-    print ("Deleting tag - " + key + ":" + value + ", snapshot_id: " + snapshot_id)
-    client.delete_tags(
-        Resources=[snapshot_id],
-        Tags=[
-            {
-                'Key': key,
-                'Value':value
-            },
-        ]
-    )
-
-def create_tag(client, snapshot_id, key, value):
-    print ("Creating tag - " + key + ":" + value + ", snapshot_id: " + snapshot_id)
-    client.create_tags(
-        Resources=[snapshot_id],
-        Tags=[
-            {
-                'Key': key,
-                'Value':value 
-            },
-        ]
-    )
 
 ###############################################
 # Will copy the snapshot to the other region. #
