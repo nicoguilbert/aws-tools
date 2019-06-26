@@ -271,17 +271,19 @@ class EBSSnapshot(object):
         pattern = re.compile("^sc-")
         
         self.set_snapshot_name()
-        self.set_tags()
         
         test_match = pattern.match(self.name)
         if test_match != None:
             return True
     
+        self.set_tags()
+        
         for t in self.tags:
             # If the snapshot has already been copied
             if t['Key'] == 'BackupCrossRegion' and t['Value'] == 'Done':
                 return True
-
+        
+        self.set_new_snapshot_description()
         return False
     
     def get_volume_attachments(self, volume_id):
