@@ -8,9 +8,9 @@ The copy functions will disable the CloudWatch rule when they are done copying s
 
 # Setup
  
-*Feel free to change the names of the functions but make sure to change the ARN too if you do. You should also be careful with the resources the permissions are targeted to.*
+*I strongly recommend you do not change the names of the functions because they are used everywhere to link the functions between them.*
 
-## EbsSnapshotCopyCrossRegion
+## Lambda function : EbsSnapshotCopyCrossRegion
 
 Go to the AWS Console > Lambda. &nbsp;
 
@@ -55,21 +55,22 @@ This function needs a Role with at least these permissions :
             "Action": [
                 "ec2:DeleteSnapshot"
             ],
-            "Resource": "arn:aws:ec2:us-west-2:728679744102:*"
+            "Resource": "arn:aws:ec2:*"
         },
         {
             "Effect": "Allow",
             "Action": [
-                "events:DisableRule"
+                "events:RemoveTargets",
+                "events:DeleteRule"
             ],
-            "Resource": "arn:aws:events:us-west-1:728679744102:rule/EbsSnapshotCopyCrossRegion-Trigger"
+            "Resource": "arn:aws:events:*"
         },
         {
             "Effect": "Allow",
             "Action": [
                 "sns:Publish"
             ],
-            "Resource": "arn:aws:sns:us-west-1:728679744102:EmailsToSend"
+            "Resource": "arn:aws:sns:*"
         }
     ]
 }
@@ -89,11 +90,11 @@ Set the timeout to 1 minute. The usual duration of the function is less than 30 
 
 ### The other parameters
 
-You change let unchanged the other parameters.
+You can let unchanged the other parameters.
 
 http://asvignesh.in/aws-lambda-delete-old-ebs-snapshots-using-boto3/
 
-## RdsSnapshotCopyCrossRegion
+## Lambda function : RdsSnapshotCopyCrossRegion
 
 Go to the AWS Console > Lambda. &nbsp;
 
@@ -136,21 +137,22 @@ This function needs a Role with at least these permissions :
             "Action": [
                 "rds:DeleteDbSnapshot"
             ],
-            "Resource": "arn:aws:ec2:us-west-2:728679744102:*"
+            "Resource": "arn:aws:ec2:*"
         },
         {
             "Effect": "Allow",
             "Action": [
-                "events:DisableRule"
+                "events:RemoveTargets",
+                "events:DeleteRule"
             ],
-            "Resource": "arn:aws:events:us-west-1:728679744102:rule/RdsSnapshotCopyCrossRegion-Trigger"
+            "Resource": "arn:aws:events:*"
         },
         {
             "Effect": "Allow",
             "Action": [
                 "sns:Publish"
             ],
-            "Resource": "arn:aws:sns:us-west-1:728679744102:EmailsToSend"
+            "Resource": "arn:aws:sns:*"
         }
     ]
 }
@@ -166,9 +168,9 @@ Set the timeout to 1 minute. The usual duration of the function is less than 30 
 
 ### The other parameters
 
-You change let unchanged the other parameters.
+You can let unchanged the other parameters.
 
-## TriggerSnapshotCopyFunctions
+## Lambda function : TriggerSnapshotCopyFunctions
 
 Go to the AWS Console > Lambda. &nbsp;
 
@@ -180,7 +182,7 @@ TriggerCopyFunctions | Python 3.7
 
 ### Role
 
-This function needs a Role with at least these permissions :
+This function needs a Role with at least these permissions : (Replace us-west-1 by the region where these functions are deployed)
 
 ```
   {
@@ -200,9 +202,14 @@ This function needs a Role with at least these permissions :
           {
             "Effect": "Allow",
             "Action": [
-              "events:EnableRule"
+                "events:PutRule",
+                "events:PutTargets",
+                "events:EnableRule"
             ],
-            "Resource": "*"
+            "Resource": [
+                "arn:aws:events:us-west-1:728679744102:rule/EbsSnapshotCopyCrossRegion-Trigger",
+                "arn:aws:events:us-west-1:728679744102:rule/RdsSnapshotCopyCrossRegion-Trigger"
+            ]
           }
       ]
   },
@@ -235,7 +242,7 @@ Once the function is changed the CloudWatch Event will start processing and will
 
 # Emails
 
-*These function do not necessarily need to be re-created. They already exist and can work like that, but if you want to have them in the east region then here are the instructions. If you do that and change the names, do not forget to change the arn in the SNS Publish permissions in the previous functions. You might also want to only re-create the Lambda function and subscribe it to the existing topic*
+*These services do not necessarily need to be re-created. They already exist and can work like that, but if you want to have them in the east region then here are the instructions. If you do that and change the names, do not forget to change the arn in the SNS Publish permissions in the previous functions. You might also want to only re-create the Lambda function and subscribe it to the existing topic*
 
 This application uses AWS SES and SNS to send e-mails. For that you need to use an email address verified by AWS. &nbsp;
 
@@ -294,7 +301,7 @@ Set the timeout to 1 minute. The usual duration of the function is less than 30 
 
 ### The other parameters
 
-You change let unchanged the other parameters.
+You can let unchanged the other parameters.
 
 ### Code
 

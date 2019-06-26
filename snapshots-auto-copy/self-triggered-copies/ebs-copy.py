@@ -1,6 +1,6 @@
 ################################################################
 # This script copies every snapshot from us-west-2 to us-west-1
-# Python 3.7
+# Python 3.
 ################################################################
 
 import boto3
@@ -361,7 +361,13 @@ def lambda_handler(event, context):
     
     if snapshot_list == []:
         events_client = boto3.client('events')
-        response = events_client.disable_rule(
+        events_client.remove_targets(
+            Rule="{0}-Trigger".format(context.function_name),
+            Ids=[
+                '1',
+            ]
+        )
+        events_client.delete_rule(
             Name="{0}-Trigger".format(context.function_name)
         )
         print ("Rule disabled. No more snapshots to copy")
