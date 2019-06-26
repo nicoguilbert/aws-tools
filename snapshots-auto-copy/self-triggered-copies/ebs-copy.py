@@ -80,7 +80,7 @@ class Ec2Instances(object):
                 n = n + 1
         
         self.sort()
-        print(str(n) + "EBS snapshots to copy from " + self.region_source)
+        print(str(n) + " EBS snapshots to copy from " + self.region_source)
         return n
     
     def copy_snapshot(self, old_snapshot):
@@ -126,7 +126,6 @@ class Ec2Instances(object):
             n = n + 1
             if n == copy_limit:
                 exit(0)
-
 
 class EBSSnapshot(object):
 
@@ -270,8 +269,41 @@ class EBSSnapshot(object):
                 new_description = new_description + instance_name + block_device + ", RegionSource: " + region_source
 
         self.new_snapshot_description = new_description
-    
 
+    # deletion
+
+    def delete_snapshot(self, client, snapshot_id):
+        self.client.delete_snapshot(SnapshotId=snapshot_id)
+    
+    def get_autocopied_snapshots(self):
+        snapshots = self.ec2_dest.describe_snapshots(
+            Filters=[{ 'Name': 'tag:SnapshotType', 'Values': 'AutomatedCopyCrossRegion' }],
+            OwnerIds=[ 
+                self.aws_account, 
+            ],
+        )
+        return snapshots
+
+    def get_delete_time(self, older_days):
+        delete_time = datetime.now(tz=timezone.utc) - timedelta(days=older_days)
+        return delete_time
+
+    def delete_snapshots(self, older_days=14):
+        delete_snapshots_num = 0
+
+        snapshots = self.get_autocopied_snapshots()
+
+        for snapshot in snapshots['Snapshots']:
+            start_time = snapshot['StartTime']
+            if (start_time < self.get_delete_data(older_days)):
+                try:
+                    self.delete_snapshot(self.ec2_dest, snapshot['SnapshotId'])
+                    delete_snapshots_num = delete_snapshots_num + 1
+                except:
+                    print ("This snapshot was probably 'InUse' by an Image. Won't be deleted.")
+
+        print(str(delete_snapshots_num) + " snapshots deleted on region " + self.region_dest)
+        return delete_snapshots_num
 
             
 def lambda_handler(event, context):
@@ -287,6 +319,7 @@ def lambda_handler(event, context):
     '''
     ec2 = Ec2Instances("us-west-1", "us-west-2")
     ec2.copy_snapshots(5)
+    ec2.delete_snapshots(0.00001)
 
 
 
@@ -345,11 +378,12 @@ def delete_old_snapshots():
                 print ("## <= Deletion over")
         except:
             print ("This snapshot was probably 'InUse' by an Image. Won't be deleted.")
-
+'''
 
 #################################
 # Function called by AWS Lambda #
 #################################
+'''
 
 def lambda_handler(event, context):
     nb_copy = get_nb_copy(CLIENT_DEST)
@@ -400,30 +434,5 @@ def lambda_handler(event, context):
         print ("No snapshots to copy at this call of the function")
 
     delete_old_snapshots()
-    # deletion
-    def get_autocopied_snapshots(self):
-        snapshots = self.ec2.describe_snapshots(
-            Filters=[{ 'Name': 'tag:SnapshotType', 'Values': 'AutomatedCopyCrossRegion' }],
-            OwnerIds=[ 
-                self.aws_account, 
-            ],
-        )
-        return snapshots
 
-    def delete_snapshot(self, snapshot_id):
-        self.ec2_source.delete_snapshot(SnapshotId=snapshot_id)
-    
-    def delete_snapshots(self, older_days=14):
-        delete_snapshots_num = 0
-        snapshots = self.get_autocopied_snapshots()
-        for snapshot in snapshots['Snapshots']:
-            fmt_start_time = snapshot['StartTime']
-            if (fmt_start_time < self.get_delete_data(older_days)):
-                self.delete_snapshot(snapshot['SnapshotId'])
-                delete_snapshots_num + 1
-        return delete_snapshots_num
-
-    def get_delete_time(self, older_days):
-        delete_time = datetime.now(tz=timezone.utc) - timedelta(days=older_days)
-        return delete_time;
     '''
