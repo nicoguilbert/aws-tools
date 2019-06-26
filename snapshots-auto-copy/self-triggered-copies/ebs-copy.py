@@ -49,17 +49,17 @@ class Ec2Instances(object):
         return response["Snapshots"]
 
 
-    def set_snapshots_list(self):
+    def set_snapshots(self):
         n = 0
         snapshots = self.get_snapshots()       
         
         for snapshot in snapshots:
-            s = Snapshot(self.ec2_source, snapshot["SnapshotId"])
+            s = EBSSnapshot(self.ec2_source, snapshot["SnapshotId"])
             already_copied = s.filter_snapshot()        
         
-        if already_copied == False:
-            self.snapshots.append(s)
-            n = n + 1
+            if already_copied == False:
+                self.snapshots.append(s)
+                n = n + 1
         
         self.snapshot.sort(key=lambda r:r.start_time, reverse=True)
         print(str(n) + "EBS snapshots to copy from " + region_source)
@@ -94,20 +94,67 @@ class Ec2Instances(object):
         delete_time = datetime.now(tz=timezone.utc) - timedelta(days=older_days)
         return delete_time;
 
+    def copy_snapshot(self, old_snapshot):
+        print ("Started copying.. snapshot_id: " + old_snapshot.id + ", from: " + self.region_source + ", to: " + self.region_dest)
 
-class Snapshot(object):
+        try:
+            copy_response = self.ec2_dest.copy_snapshot(
+                Description = old_snapshot.new_snapshot_description,
+                SourceRegion = self.region_source,
+                SourceSnapshotId = old_snapshot.id,
+                DryRun=False
+            )
 
-    def __init__(self, ec2_client, snapshot_id):
+        except:
+            self.send_email(
+                subject = "An EBS Snapshot not copied",
+                message = """
+                    {
+                        "sender": "Sender Name  <%s>",
+                        "recipient":"%s",
+                        "aws_region":"%s",
+                        "body": "The snapshot %s encountered  problem during the copy process. The copy did not succeed."
+                    }
+                """ % (EMAIL_SENDER, EMAIL_RECIPIENT, EMAIL_REGION, old_snapshot.id)
+            )
+            print("The snapshot {0} encountered  problem during the copy process. The copy did not succeed.".format(old_snapshot.id))
+        
+
+
+        new_s = EBSSnapshot(self.ec2_dest, copy_response["SnapshotId"])
+        print ('new snapshot id : ' + new_s.id)
+        
+        new_s.copy_update_tags(old_snapshot)
+
+        return new_s.id
+
+    def copy_snapshots(self):
+        n = 0
+        self.set_snapshots()
+        for s in self.snapshots:
+            new_id = copy_snapshot(s)
+            print("Snapshot " + s.id + " successfully copied to snapshot " + new_id)
+            n = n + 1
+            if n == copy_limit:
+                exit(0)
+
+
+class EBSSnapshot(object):
+
+    def __init__(self, ec2_client, snapshot_id, region_source = None, region_dest = None):
         self.ec2 = ec2_client
-        self.snapshot = ec2_client.Snapshot(snapshot_id) 
-        self.id = self.snapshot.snapshot_id
-        self.volume_id = self.snapshot.volume_id
-        self.description = self.snapshot.description
-        self.start_time = self.snapshot.start_time
-        self.tags = self.snapshot.tags
+        self.snapshot_client = ec2_client.Snapshot(snapshot_id) 
+        self.id = self.snapshot_client.snapshot_id
+        self.volume_id = self.snapshot_client.volume_id
+        self.description = self.snapshot_client.description
+        self.start_time = self.snapshot_client.start_time
+        self.tags = self.snapshot_client.tags
+        self.name = ""
         self.instance_name = ""
-        self.
-
+        if region_source != None:
+            self.region_source = region_source
+        if region_dest != None:
+            self.region_dest = region_dest
 
     def create_tag(self, key, value):
         print ("Creatin tag - " + key + ":" + value + ", snapshot_id: " + self.id)
@@ -132,6 +179,43 @@ class Snapshot(object):
         if (next((item for item in self.tags if item['Key'] == 'BackupCrossRegion'), False) == False):
                 self.create_tag(CLIENT_SOURCE, snapshot_id, 'BackupCrossRegion', 'Waiting')
     
+    def copy_tags(self, tags):
+        tag = self.ec2.create_tags(
+                Resources=[self.id],
+                Tags=tags
+            )
+        return tag
+
+    def copy_update_tags(self, old_snapshot):
+        #Copying tags from original snapshot to new snapshot
+        try:
+            tag = new_s.copy_tags(old_snapshot.tags)
+        except:
+            new_s.create_tag('IssueWithTags', 'Colon')
+            print ("This snapshot might contain tags starting by 'aws:'. No way to handle them now.")
+            print (new_s.id)
+    
+    
+        # if there was a tag "Name"
+        if old_snapshot.name != "NameUndefined":
+            new_s.delete_tag('Name', name)
+        # if the value of the tag "Name" was empty
+        if old_snapshot.name == "":
+            name = "NameEmpty"
+    
+        copy_name = "sc-" + name + "-" + old_snapshot.start_time.strftime("%Y-%m-%d")
+    
+        new_s.create_tag('Name', copy_name)
+        new_s.create_tag('SnapshotType', 'AutomatedCopyCrossRegion')
+        new_s.create_tag('OriginalSnapshotID', old_snapshot.id)
+    
+        print("Successfully copyied.. snapshot_id: " + old_snapshot.id + ", from: " + old_snapshot.region_source + ", to: " + old_snapshot.region_dest)
+    
+        old_snapshot.delete_tag('BackupCrossRegion', 'Waiting')
+        old_snapshot.create_tag('BackupCrossRegion', 'Done')
+
+        return new_snapshot_id
+
     def filter_snapshot(self):
         pattern = re.compile("^sc-")
 
@@ -160,7 +244,7 @@ class Snapshot(object):
             print ("The volume '" + volume_id + "' cannot be found. Must have been deleted.")
             return False
 
-    def set_instance_name(instance_id):
+    def set_instance_name(self, instance_id):
         instance = ec2_source.Instance(instance_id)
         
         for tag in instance.tags:
@@ -168,7 +252,37 @@ class Snapshot(object):
                 self.instance_name = tag["Value"]
 
         self.instance_name = "NameUndefined"
+        return self.instance_name
 
+    def set_snapshot_name(self):
+        for tag in self.tags:
+            if tag["Key"] == "Name":
+                self.name = tag["Value"]
+
+        self.name = "NameUndefined"
+
+    def set_new_snapshot_description(self):
+        new_description = ""
+    
+        if self.volume_id == "vol-ffffffff":
+            new_description = "This snapshot was a copy of another.. "
+        else: 
+            # Puts a list in attachments. The list only contains one element
+            # Or contains a string
+            attachments = get_volume_attachments(self.volume_id)
+            if attachments == False:
+                new_description = "Volume did not exist. Could not find attachements."
+            elif attachments == []:
+                new_description = new_description + "Volume not attached/deleted." + " RegionSource: " + region_source
+            else:
+                # Puts a dictionnary containing the volume informations inside volume_dict
+                volume_dict = attachments[0]
+                instance_name = "Ec2Name: " + set_instance_name(volume_dict["InstanceId"])
+                block_device = ", BlockDevice: " + volume_dict["Device"]
+                new_description = new_description + instance_name + block_device + ", RegionSource: " + region_source
+
+        self.new_snapshot_description = new_description
+    
 
 
             
@@ -209,118 +323,7 @@ EC2_RESOURCE = boto3.resource('ec2')
 # https://timesofcloud.com/aws-lambda-copy-5-snapshots-between-region/
 ######################################################################################
 
-    
 
-
-
-
-
-
-
-def get_snapshot_name(snapshot_id):
-    snapshot = EC2_RESOURCE.Snapshot(snapshot_id)
-
-    for tag in snapshot.tags:
-        if tag["Key"] == "Name":
-            return tag["Value"]
-
-    return "NameUndefined"
-
-###############################################
-# Returns the description of the new snapshot.#
-###############################################
-
-def get_volume_description(snapshot_id):
-    description = ""
-    volume_id = get_volume_id(snapshot_id)
-    
-    if volume_id == "vol-ffffffff":
-        description = "This snapshot was a copy of another.. "
-    else: 
-        # Puts a list in attachments. The list only contains one element
-        # Or contains a string
-        attachments = get_volume_attachments(volume_id)
-        if attachments == False:
-            description = "Volume did not exist. Could not find attachements."
-        elif attachments == []:
-            description = description + "Volume not attached/deleted." + " RegionSource: " + SOURCE_REGION
-        else:
-            # Puts a dictionnary containing the volume informations inside volume_dict
-            volume_dict = attachments[0]
-            instance_name = "Ec2Name: " + get_instance_name(volume_dict["InstanceId"])
-            block_device = ", BlockDevice: " + volume_dict["Device"]
-            description = description + instance_name + block_device + ", RegionSource: " + SOURCE_REGION
-
-    return description
-
-
-###############################################
-# Will copy the snapshot to the other region. #
-###############################################
-
-def copy_snapshot(snapshot_id, tags):
-    print ("Started copying.. snapshot_id: " + snapshot_id + ", from: " + SOURCE_REGION + ", to: " + DEST_REGION)
-    description = get_volume_description(snapshot_id)
-
-    try:
-        copy_response = CLIENT_DEST.copy_snapshot(
-            Description=description,
-            SourceRegion=SOURCE_REGION,
-            SourceSnapshotId=snapshot_id,
-            DryRun=False
-        )
-
-    except:
-        send_email(
-                subject = "An EBS Snapshot not copied",
-                message = """
-                    {
-                        "sender": "Sender Name  <%s>",
-                        "recipient":"%s",
-                        "aws_region":"%s",
-                        "body": "The snapshot %s encountered  problem during the copy process. The copy did not succeed."
-                    }
-                """ % (EMAIL_SENDER, EMAIL_RECIPIENT, EMAIL_REGION, snapshot_id)
-        )
-        
-
-    new_snapshot_id = copy_response["SnapshotId"]
-    print ('new_snapshot_id : ' + new_snapshot_id)
-    old_snapshot = EC2_RESOURCE.Snapshot(snapshot_id)
-    new_snapshot = EC2_RESOURCE.Snapshot(new_snapshot_id)
-    
-    #Copying tags from original snapshot to new snapshot
-    try:
-        tag = CLIENT_DEST.create_tags(
-            Resources=[new_snapshot_id],
-            Tags=tags
-        )
-    except:
-        create_tag(CLIENT_DEST, new_snapshot_id, 'IssueWithTags', 'Colon')
-        print ("This snapshot might contain tags starting by 'aws:'. No way to handle them now.")
-        print (new_snapshot_id)
-    
-    
-    name = get_snapshot_name(snapshot_id)
-    # if here was tag "Name"
-    if name != "NameUndefined":
-        delete_tag(CLIENT_DEST, new_snapshot_id, 'Name', name)
-    # if the value of the tag "Name" was empty
-    if name == "":
-        name = "NameEmpty"
-    
-    copy_name = "sc-" + name + "-" + old_snapshot.start_time.strftime("%Y-%m-%d")
-    
-    create_tag(CLIENT_DEST, new_snapshot_id, 'Name', copy_name)
-    create_tag(CLIENT_DEST, new_snapshot_id, 'SnapshotType', 'AutomatedCopyCrossRegion')
-    create_tag(CLIENT_DEST, new_snapshot_id, 'OriginalSnapshotID', snapshot_id)
-    
-    print("Successfully copyied.. snapshot_id: " + snapshot_id + ", from: " + SOURCE_REGION + ", to: " + DEST_REGION)
-    
-    delete_tag(CLIENT_SOURCE, snapshot_id, 'BackupCrossRegion', 'Waiting')
-    create_tag(CLIENT_SOURCE, snapshot_id, 'BackupCrossRegion', 'Done')
-
-    return new_snapshot_id
 
 #################################################
 # Will delete old snapshots on the other region #
