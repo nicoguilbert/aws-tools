@@ -9,7 +9,22 @@ import datetime
 import re
 from datetime import datetime, timedelta, timezone
 
-import boto3
+
+######################
+#  Global variables. #
+######################
+
+SOURCE_REGION = 'us-west-1'
+DEST_REGION = 'us-west-2'
+
+# How many days do you want to keep the snapshots
+DAYS_OF_RETENTION = 14
+RETENTION_TIME = DAYS_OF_RETENTION * 86400
+
+EMAIL_SENDER = "nicolasguilbert.tours@gmail.com"
+EMAIL_RECIPIENT = "nicolasguilbert.tours@gmail.com"
+EMAIL_REGION = "us-west-2"
+
 
 class Ec2Instances(object):
     
@@ -19,6 +34,7 @@ class Ec2Instances(object):
         self.aws_account = '728679744102'
         self.ec2_source = boto3.client('ec2', region_name=region_source)
         self.ec2_dest = boto3.client('ec2', region_name=region_dest)
+        self.ec2_resource = boto3.resource('ec2')
         self.sns = boto3.resource('sns')
         self.snapshots = []
 
@@ -29,6 +45,9 @@ class Ec2Instances(object):
                 Subject = subject,
                 Message = message
             )
+    
+    def sort(self):
+        self.snapshots.sort(key=lambda r:r.start_time, reverse=True)
 
     def get_nb_copy(self):
         response = self.ec2_dest.describe_snapshots(
@@ -48,52 +67,22 @@ class Ec2Instances(object):
         )
         return response["Snapshots"]
 
-
     def set_snapshots(self):
         n = 0
         snapshots = self.get_snapshots()       
         
         for snapshot in snapshots:
-            s = EBSSnapshot(self.ec2_source, snapshot["SnapshotId"])
+            s = EBSSnapshot(self.ec2_resource, snapshot["SnapshotId"])
             already_copied = s.filter_snapshot()        
         
             if already_copied == False:
                 self.snapshots.append(s)
                 n = n + 1
         
-        self.snapshot.sort(key=lambda r:r.start_time, reverse=True)
-        print(str(n) + "EBS snapshots to copy from " + region_source)
+        self.sort()
+        print(str(n) + "EBS snapshots to copy from " + self.region_source)
         return n
-
-
-
-    # deletion
-    def get_autocopied_snapshots(self):
-        snapshots = self.ec2.describe_snapshots(
-            Filters=[{ 'Name': 'tag:SnapshotType', 'Values': 'AutomatedCopyCrossRegion' }],
-            OwnerIds=[ 
-                self.aws_account, 
-            ],
-        )
-        return snapshots
-
-    def delete_snapshot(self, snapshot_id):
-        self.ec2.delete_snapshot(SnapshotId=snapshot_id)
     
-    def delete_snapshots(self, older_days=14):
-        delete_snapshots_num = 0
-        snapshots = self.get_autocopied_snapshots()
-        for snapshot in snapshots['Snapshots']:
-            fmt_start_time = snapshot['StartTime']
-            if (fmt_start_time < self.get_delete_data(older_days)):
-                self.delete_snapshot(snapshot['SnapshotId'])
-                delete_snapshots_num + 1
-        return delete_snapshots_num
-
-    def get_delete_data(self, older_days):
-        delete_time = datetime.now(tz=timezone.utc) - timedelta(days=older_days)
-        return delete_time;
-
     def copy_snapshot(self, old_snapshot):
         print ("Started copying.. snapshot_id: " + old_snapshot.id + ", from: " + self.region_source + ", to: " + self.region_dest)
 
@@ -128,7 +117,7 @@ class Ec2Instances(object):
 
         return new_s.id
 
-    def copy_snapshots(self):
+    def copy_snapshots(self, copy_limit):
         n = 0
         self.set_snapshots()
         for s in self.snapshots:
@@ -194,8 +183,7 @@ class EBSSnapshot(object):
             new_s.create_tag('IssueWithTags', 'Colon')
             print ("This snapshot might contain tags starting by 'aws:'. No way to handle them now.")
             print (new_s.id)
-    
-    
+        
         # if there was a tag "Name"
         if old_snapshot.name != "NameUndefined":
             new_s.delete_tag('Name', name)
@@ -287,33 +275,20 @@ class EBSSnapshot(object):
 
             
 def lambda_handler(event, context):
-    print("event " + str(event))
-    print("context " + str(context))
-    ec2_reg = boto3.client('ec2')
-    regions = ec2_reg.describe_regions()
+    #ec2_reg = boto3.client('ec2')
+    #regions = ec2_reg.describe_regions()
+    '''
     for region in regions['Regions']:
         region_name = region['RegionName']
         instances = Ec2Instances(region_name)
         deleted_counts = instances.delete_snapshots(1)
         print("deleted_counts for region "+ str(region_name) +" is " + str(deleted_counts))
     return 'completed'
+    '''
+    ec2 = Ec2Instances("us-west-1", "us-west-2")
+    ec2.copy_snapshots(5)
 
-######################
-#  Global variables. #
-######################
 
-SOURCE_REGION = 'us-west-1'
-DEST_REGION = 'us-west-2'
-
-# How many days do you want to keep the snapshots
-DAYS_OF_RETENTION = 14
-RETENTION_TIME = DAYS_OF_RETENTION * 86400
-
-EMAIL_SENDER = "nicolasguilbert.tours@gmail.com"
-EMAIL_RECIPIENT = "nicolasguilbert.tours@gmail.com"
-EMAIL_REGION = "us-west-2"
-
-EC2_RESOURCE = boto3.resource('ec2')
 
 ######################################################################################
 # Boto3 documentation.
@@ -328,7 +303,7 @@ EC2_RESOURCE = boto3.resource('ec2')
 #################################################
 # Will delete old snapshots on the other region #
 #################################################
-
+'''
 def delete_old_snapshots():
     response = CLIENT_DEST.describe_snapshots(
         Filters=[
@@ -425,3 +400,30 @@ def lambda_handler(event, context):
         print ("No snapshots to copy at this call of the function")
 
     delete_old_snapshots()
+    # deletion
+    def get_autocopied_snapshots(self):
+        snapshots = self.ec2.describe_snapshots(
+            Filters=[{ 'Name': 'tag:SnapshotType', 'Values': 'AutomatedCopyCrossRegion' }],
+            OwnerIds=[ 
+                self.aws_account, 
+            ],
+        )
+        return snapshots
+
+    def delete_snapshot(self, snapshot_id):
+        self.ec2_source.delete_snapshot(SnapshotId=snapshot_id)
+    
+    def delete_snapshots(self, older_days=14):
+        delete_snapshots_num = 0
+        snapshots = self.get_autocopied_snapshots()
+        for snapshot in snapshots['Snapshots']:
+            fmt_start_time = snapshot['StartTime']
+            if (fmt_start_time < self.get_delete_data(older_days)):
+                self.delete_snapshot(snapshot['SnapshotId'])
+                delete_snapshots_num + 1
+        return delete_snapshots_num
+
+    def get_delete_time(self, older_days):
+        delete_time = datetime.now(tz=timezone.utc) - timedelta(days=older_days)
+        return delete_time;
+    '''
