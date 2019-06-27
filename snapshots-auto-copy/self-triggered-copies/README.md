@@ -136,7 +136,7 @@ This function needs a Role with at least these permissions :
             "Action": [
                 "rds:DeleteDbSnapshot"
             ],
-            "Resource": "arn:aws:ec2:us-west-2:728679744102:*"
+            "Resource": "arn:aws:rds:us-west-2:728679744102:*"
         },
         {
             "Effect": "Allow",
