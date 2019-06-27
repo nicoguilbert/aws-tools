@@ -14,24 +14,123 @@ import json
 #  Global variables. #
 ######################
 
-SOURCE_REGION = 'us-west-1'
-DEST_REGION = 'us-west-2'
-AWS_ACCOUNT = '728679744102'
+REGIONS = [
+    {
+        "Source" : "us-west-1",
+        "Destination" : "us-west-2"
+    }
+]
+
+ACCOUNT = "728679744102"
+
+# How many days do you want to keep the snapshots
+DAYS_OF_RETENTION = 14
 
 EMAIL_SENDER = "nicolasguilbert.tours@gmail.com"
 EMAIL_RECIPIENT = "nicolasguilbert.tours@gmail.com"
 EMAIL_REGION = "us-west-2"
-
-SNS = boto3.resource('sns')
-EMAIL_TOPIC = SNS.Topic('arn:aws:sns:us-west-1:728679744102:EmailsToSend')
+TOPIC_ARN = "arn:aws:sns:us-west-1:728679744102:EmailsToSend"
 
 # How many days do you want to keep the snapshots
 DAYS_OF_RETENTION = 14
 RETENTION_TIME = DAYS_OF_RETENTION * 86400
 
-CLIENT_DB_SOURCE = boto3.client("rds", region_name=SOURCE_REGION)
-CLIENT_DB_DEST = boto3.client("rds", region_name=DEST_REGION)
 CLIENT_LAMBDA = boto3.client("lambda", region_name=SOURCE_REGION)
+
+class RdsDB(object):
+
+    def __init__(self, region_source, region_dest, snap_type):
+        self.region_source = region_source
+        self.region_dest = region_dest
+        self.snap_type = snap_type
+        self.aws_account = ACCOUNT
+        self.client_db_source = boto3.client("rds", region_name=self.region_source)
+        self.client_db_dest = boto3.client("rds", region_name=self.region_dest)
+        self.sns = boto3.resource('sns')
+        self.email_topic = self.sns.Topic(TOPIC_ARN)
+        self.snapshots = []
+
+    def send_email(self, subject, message):
+        print ("Sending email.")
+        self.email_topic.publish(
+                Subject = subject,
+                Message = message
+            )
+        print ("Email sent.")
+
+    def sort(self):
+        self.snapshots.sort(key=lambda r:r[2], reverse=True)
+
+
+    def get_nb_copy(self):
+        response = self.client_db_dest.describe_db_snapshots(
+            IncludeShared=False,
+            IncludePublic=False
+        )
+        snapshots = response['DBSnapshots']
+        nb_copy = 0
+    
+        for snapshot in snapshots:
+            if snapshot["Status"] == 'pending' or snapshot["Status"] == 'creating':
+                nb_copy = nb_copy + 1
+        return nb_copy
+
+    def get_snapshots(self):
+        # DOES NOT WORK FOR AURORA ! ! !
+        response = self.client_db_source.describe_db_snapshots(
+            SnapshotType=self.snap_type,
+            IncludeShared=False,
+            IncludePublic=False
+        )
+        return response['DBSnapshots']
+
+    def get_copy_name(self,database, snapshot_name, start_time):
+        if self.snap_type == "automated":
+            copy_name = "sc-" + database + "-" + start_time.strftime("%Y-%m-%d-%Hh%Mm")
+        elif self.snap_type == "manual":
+            copy_name = "sc-" + snapshot_name + "-" + start_time.strftime("%Y-%m-%d-%Hh%Mm")
+
+        return copy_name
+
+    def already_copied(self, copy_name):
+        print("Checking if " + copy_name + " is copied")
+
+        try:
+            self.client_db_dest.describe_db_snapshots(
+                DBSnapshotIdentifier=copy_name
+            )
+            print("Already Copied")
+
+            return True
+        except:
+            return False
+    
+    def set_db_snapshots(self):
+        n = 0
+        snapshots = self.get_snapshots()
+
+        for snapshot in snapshots:
+            if snapshot['Status'] != 'available':
+                continue
+        
+            database = snapshot["DBInstanceIdentifier"]
+            start_time = snapshot["SnapshotCreateTime"]
+            snapshot_name = snapshot["DBSnapshotIdentifier"]
+
+        ###################################################################
+        # Naming rule for the new snapshot :
+        # Automated => Name of database + Creation date (year-month-day)
+        # Manual    => Name of the snapshot + Creation date 
+        ###################################################################
+        
+        copy_name = get_copy_name(database, snapshot_name, start_time)
+        if self.already_copied(copy_name) == False:
+            self.snapshots.append((database, snapshot_name, start_time))
+            n = n + 1
+
+        self.sort()
+        print(str(n) + " RDS snapshots to copy in " + self.region_source)
+        return n
 
 ######################################################################################
 # Boto3 documentation.
@@ -40,72 +139,10 @@ CLIENT_LAMBDA = boto3.client("lambda", region_name=SOURCE_REGION)
 # Original function (lot of typos like double quotes missing)
 # https://timesofcloud.com/aws-lambda-copy-5-snapshots-between-region/
 ######################################################################################
-
-def send_email(subject, message):
-    print ("Sending email.")
-    EMAIL_TOPIC.publish(
-                Subject = subject,
-                Message = message
-            )
-            
-def get_snapshots(client, type):
-    # DOES NOT WORK FOR AURORA ! ! !
-    response = client.describe_db_snapshots(
-            SnapshotType=type,
-            IncludeShared=False,
-            IncludePublic=False
-    )
-
-    return response['DBSnapshots']
-
-def get_nb_copy(client):
-    response = client.describe_db_snapshots(
-            IncludeShared=False,
-            IncludePublic=False
-    )
-    snapshots = response['DBSnapshots']
-    nb_copy = 0
     
-    for snapshot in snapshots:
-        if snapshot["Status"] == 'pending' or snapshot["Status"] == 'creating':
-            nb_copy = nb_copy + 1
-    return nb_copy
+def copy_snapshots(snapshots, snap_type, copy_limit):    
+    nb_to_copy = set_db_snapshots()
     
-def launch_copy_snapshots(snapshots, snap_type, copy_limit):    
-    snapshot_list = []
-    for snapshot in snapshots:
-        if snapshot['Status'] != 'available':
-            continue
-        
-        database = snapshot["DBInstanceIdentifier"]
-        start_time = snapshot["SnapshotCreateTime"]
-        snapshot_name = snapshot["DBSnapshotIdentifier"]
-
-        ###################################################################
-        # Naming rule for the new snapshot :
-        # Automated => Name of database + Creation date (year-month-day)
-        # Manual    => Name of the snapshot + Creation date 
-        ###################################################################
-        
-        if snap_type == "automated":
-            copy_name = "sc-" + database + "-" + start_time.strftime("%Y-%m-%d-%Hh%Mm")
-        elif snap_type == "manual":
-            copy_name = "sc-" + snapshot_name + "-" + start_time.strftime("%Y-%m-%d-%Hh%Mm")
-        
-        print("Checking if " + copy_name + " is copied")
-
-        try:
-            CLIENT_DB_DEST.describe_db_snapshots(
-                DBSnapshotIdentifier=copy_name
-            )
-            print("Already Copied")
-            continue
-        except:
-            snapshot_list.append((database, snapshot_name, start_time))
-            continue
-            
-    snapshot_list.sort(key=lambda r:r[2], reverse=True)
-
     n = len(snapshot_list)
     i = 0
     

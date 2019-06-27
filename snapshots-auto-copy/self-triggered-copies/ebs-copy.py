@@ -49,6 +49,7 @@ class Ec2Instances(object):
                 Subject = subject,
                 Message = message
             )
+        print ("Email sent.")
     
     def sort(self):
         self.snapshots.sort(key=lambda r:r.start_time, reverse=True)
@@ -395,59 +396,4 @@ def lambda_handler(event, context):
 # https://timesofcloud.com/aws-lambda-copy-5-snapshots-between-region/
 ######################################################################################
 
-#################################
-# Function called by AWS Lambda #
-#################################
-'''
-
-def lambda_handler(event, context):
-    nb_copy = get_nb_copy(CLIENT_DEST)
     
-    if nb_copy >= 5:
-        print ("Already 5 snapshots being copied.")
-        exit(0)
-    
-    copy_limit = 5 - nb_copy
-    
-    snapshots = get_snapshots(CLIENT_SOURCE)
-    snapshot_list = get_snapshot_list(snapshots)
-    
-    if snapshot_list == []:
-        events_client = boto3.client('events')
-        response = events_client.disable_rule(
-            Name="{0}-Trigger".format(context.function_name)
-        )
-        print ("Rule disabled. No more snapshots to copy")
-        send_email(
-                subject = "EBS Snapshot Copy finished",
-                message = """
-                    {
-                        "sender": "Sender Name  <%s>",
-                        "recipient":"%s",
-                        "aws_region":"%s",
-                        "body": "The copy process of EBS snapshots has just ended."
-                    }
-                """ % (EMAIL_SENDER, EMAIL_RECIPIENT, EMAIL_REGION)
-        )
-        exit(0)
-        
-    i = 0
-
-    for snapshort in snapshot_list:
-        # 5 is the number of snapshot copies you can make at the same time on AWS
-        if i < copy_limit:
-            snapshot_id = snapshort[0]
-            print ('copied snapshot id =' + snapshot_id)
-            tags = snapshort[1]
-            description = get_volume_description(snapshot_id)
-            new_snapshot_id = copy_snapshot(snapshot_id, tags)
-            i = i + 1
-        else:
-            break
-    
-    if i == 0:
-        print ("No snapshots to copy at this call of the function")
-
-    delete_old_snapshots()
-
-    '''
