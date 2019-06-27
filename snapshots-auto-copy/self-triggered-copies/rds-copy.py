@@ -84,7 +84,7 @@ class RdsDB(object):
         )
         return response['DBSnapshots']
 
-    def get_copy_name(self,database, snapshot_name, start_time):
+    def get_copy_name(self, database, snapshot_name, start_time):
         if self.snap_type == "automated":
             copy_name = "sc-" + database + "-" + start_time.strftime("%Y-%m-%d-%Hh%Mm")
         elif self.snap_type == "manual":
@@ -140,35 +140,27 @@ class RdsDB(object):
 # https://timesofcloud.com/aws-lambda-copy-5-snapshots-between-region/
 ######################################################################################
     
-def copy_snapshots(snapshots, snap_type, copy_limit):    
-    nb_to_copy = set_db_snapshots()
+    def copy_snapshot(self, snapshot, copy_name):
+        response = self.client_db_dest.copy_db_snapshot(
+            SourceDBSnapshotIdentifier='arn:aws:rds:' + self.region_source + ':' + self.aws_account + ':snapshot:' + snapshot[1],
+            TargetDBSnapshotIdentifier=copy_name,
+            CopyTags=True
+        )
+        return response
+
+    def copy_snapshots(self, snapshots, copy_limit):    
+        nb_to_copy = self.set_db_snapshots()
+        
+        n = 0
     
-    n = len(snapshot_list)
-    i = 0
-    
-    # info will contain informations about the number of snapshots being copied,
-    # and the number of snapshot left to copy
-    info = {}
-    
-    if snapshot_list == []:
-        print("No " + snap_type + "snapshots to copy.")
-    else:
-        for snap in snapshot_list:
-            if snap_type == "automated":
-                copy_name = "sc-" + snap[0] + "-" + snap[2].strftime("%Y-%m-%d-%Hh%Mm")
-            elif snap_type == "manual":
-                copy_name = "sc-" + snap[1] + "-" + snap[2].strftime("%Y-%m-%d-%Hh%Mm")
-            
-            response = CLIENT_DB_DEST.copy_db_snapshot(
-                SourceDBSnapshotIdentifier='arn:aws:rds:' + SOURCE_REGION + ':' + AWS_ACCOUNT + ':snapshot:' + snap[1],
-                TargetDBSnapshotIdentifier=copy_name,
-                CopyTags=True
-            )
-                
+        for s in self.snapshots:
+            copy_name = self.get_copy_name(s[0], s[1], s[2])
+            response = self.copy_snapshot(s, copy_name)
+
             if response['DBSnapshot']['Status'] != "pending" and response['DBSnapshot']['Status'] != "available":
                 raise Exception("Copy operation for " + copy_name + " failed!")               
                 
-                send_email(
+                self.send_email(
                     subject = "An Rds Snapshot was not copied",
                     message = """
                             {
@@ -181,14 +173,13 @@ def copy_snapshots(snapshots, snap_type, copy_limit):
                 )
                 continue
         
-            i = i + 1
+            n = n + 1
             # if 5 snapshots are already being copied, it returns the number of snapshots left to copy. 
-            if i == copy_limit:
+            if n == copy_limit:
                 break
-    
-    info["SnapshotsBeingCopied"] = i
-    info["SnapshotsRemaining"] = n - i
-    return info
+    return n
+
+    def delete_old_snapshots(self)
       
 def delete_old_snapshots(snapshots, snap_type):
     pattern = re.compile("^sc-")
