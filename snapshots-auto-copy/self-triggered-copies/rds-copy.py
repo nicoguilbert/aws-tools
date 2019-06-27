@@ -37,7 +37,7 @@ TOPIC_ARN = "arn:aws:sns:us-west-1:728679744102:EmailsToSend"
 
 # How many days do you want to keep the snapshots
 DAYS_OF_RETENTION = 14
-RETENTION_TIME = DAYS_OF_RETENTION * 86400
+#RETENTION_TIME = DAYS_OF_RETENTION * 86400
 
 ######################################################################################
 # Boto3 documentation.
@@ -245,11 +245,6 @@ def lambda_handler(event, context):
 
         o_rds_auto = RdsDB(region["Source"], region["Destination"], "automated")
         
-        nb_copy_processing = nb_copy_processing + o_rds_auto.get_nb_copy()
-        if nb_copy_processing >= 5:
-            print("Already 5 snapshots being copied. Waiting for the next call.")
-            return 0
-
         nb_to_copy = o_rds_auto.set_snapshots()
         if nb_to_copy > 0:
             rds.append(o_rds_auto)
