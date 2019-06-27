@@ -144,49 +144,6 @@ class Ec2Instances(object):
             if n == copy_limit:
                 break
         return n
-    
-    # deletion
-    def delete_snapshot(self, snapshot_id):
-        try:
-            self.ec2_dest.delete_snapshot(SnapshotId=snapshot_id)
-        except:
-            print("Error.")
-            
-    def get_autocopied_snapshots(self):
-        snapshots = self.ec2_dest.describe_snapshots(
-            Filters=[
-                { 'Name': 'status', 'Values': [ 'completed' ] },
-                { 'Name': 'tag:SnapshotType', 'Values': [ 'AutomatedCopyCrossRegion' ] }
-            ],
-            OwnerIds=[ 
-                self.aws_account, 
-            ],
-        )
-        return snapshots
-
-    def get_delete_time(self, older_days):
-        delete_time = datetime.now(tz=timezone.utc) - timedelta(days=older_days)
-        return delete_time
-
-    def delete_snapshots(self, older_days=14):
-        delete_snapshots_num = 0
-
-        snapshots = self.get_autocopied_snapshots()
-
-        for snapshot in snapshots['Snapshots']:
-            start_time = snapshot['StartTime']
-            if (start_time < self.get_delete_time(older_days)):
-                #try:
-                self.delete_snapshot(snapshot['SnapshotId'])
-                delete_snapshots_num = delete_snapshots_num + 1
-                print("Snapshot " + snapshot['SnapshotId'] + " deleted")
-                #except:
-                #    print ("This snapshot was probably 'InUse' by an Image. Won't be deleted.")
-
-        print(str(delete_snapshots_num) + " snapshots deleted on region " + self.region_dest)
-        return delete_snapshots_num
-        
-####################################
 
 class EBSSnapshot(object):
 

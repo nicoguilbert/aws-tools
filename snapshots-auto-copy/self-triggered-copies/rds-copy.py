@@ -176,46 +176,6 @@ class RdsDB(object):
                 break
         return n
 
-    def get_delete_time(self, older_days):
-        delete_time = datetime.datetime.now() - datetime.timedelta(days=older_days)
-        delete_time = delete_time.replace(tzinfo=None)
-        return delete_time
-
-    def delete_snapshot(self, snapshot_id):
-        self.client_db_dest.delete_db_snapshot(
-                    DBSnapshotIdentifier = snapshot_id
-                )
-        print(snapshot_id + " deleted.")
-
-    def delete_old_snapshots(self, older_days):
-        pattern = re.compile("^sc-")
-        n = 0
-        # DOES NOT WORK FOR AURORA ! ! !
-        response = self.client_db_dest.describe_db_snapshots(
-            IncludeShared=False,
-            IncludePublic=False
-        )
-        if len(response['DBSnapshots']) == 0:
-            print("No snapshot to delete on region " + self.region_dest)
-            return 0
-
-        delete_time = self.get_delete_time(older_days)
-
-        for snapshot in response['DBSnapshots']:
-            if snapshot['Status'] != 'available':
-                continue
-            test_match = pattern.match(snapshot['DBSnapshotIdentifier'])
-            if test_match == None:
-                continue
-
-            start_time = snapshot['SnapshotCreateTime'].replace(tzinfo=None)
-            if start_time < delete_time:
-                print("Processing deletion of snapshot " + snapshot['DBSnapshotIdentifier'])
-                self.delete_snapshot(snapshot['DBSnapshotIdentifier'])
-                n = n + 1
-
-        print(str(n) + " RDS snapshots deleted on region " + self.region_dest)
-        return n
         
 def lambda_handler(event, context):
     nb_copy_processing = 0
