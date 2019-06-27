@@ -27,17 +27,14 @@ REGIONS = [
 
 ACCOUNT = "728679744102"
 
-# How many days do you want to keep the snapshots
-DAYS_OF_RETENTION = 14
-
 EMAIL_SENDER = "nicolasguilbert.tours@gmail.com"
 EMAIL_RECIPIENT = "nicolasguilbert.tours@gmail.com"
 EMAIL_REGION = "us-west-2"
 TOPIC_ARN = "arn:aws:sns:us-west-1:728679744102:EmailsToSend"
 
 # How many days do you want to keep the snapshots
-DAYS_OF_RETENTION = 14
-#RETENTION_TIME = DAYS_OF_RETENTION * 86400
+DAYS_OF_RETENTION = 0.000000001
+RETENTION_TIME = DAYS_OF_RETENTION * 86400
 
 ######################################################################################
 # Boto3 documentation.
@@ -117,6 +114,7 @@ class RdsDB(object):
     def set_snapshots(self):
         n = 0
         snapshots = self.get_snapshots_to_copy()
+        print(snapshots)
 
         for snapshot in snapshots:
             if snapshot['Status'] != 'available':
@@ -126,19 +124,19 @@ class RdsDB(object):
             start_time = snapshot["SnapshotCreateTime"]
             snapshot_name = snapshot["DBSnapshotIdentifier"]
 
-        ###################################################################
-        # Naming rule for the new snapshot :
-        # Automated => Name of database + Creation date (year-month-day)
-        # Manual    => Name of the snapshot + Creation date 
-        ###################################################################
+            ###################################################################
+            # Naming rule for the new snapshot :
+            # Automated => Name of database + Creation date (year-month-day)
+            # Manual    => Name of the snapshot + Creation date 
+            ###################################################################
         
-        copy_name = get_copy_name(database, snapshot_name, start_time)
-        if self.already_copied(copy_name) == False:
-            self.snapshots.append((database, snapshot_name, start_time))
-            n = n + 1
+            copy_name = self.get_copy_name(database, snapshot_name, start_time)
+            if self.already_copied(copy_name) == False:
+                self.snapshots.append((database, snapshot_name, start_time))
+                n = n + 1
 
         self.sort()
-        print(str(n) + " RDS snapshots to copy in " + self.region_source)
+        print(str(n) + " RDS " + self.snap_type + " snapshots  to copy in " + self.region_source)
         return n
 
     def copy_snapshot(self, snapshot, copy_name):
@@ -179,7 +177,7 @@ class RdsDB(object):
         return n
 
     def get_delete_time(self, older_days):
-        delete_time = datetime.datetime.now() - datetime.timedelta(seconds=RETENTION_TIME)
+        delete_time = datetime.datetime.now() - datetime.timedelta(days=older_days)
         delete_time = delete_time.replace(tzinfo=None)
         return delete_time
 
@@ -227,6 +225,7 @@ def lambda_handler(event, context):
     rds = []
 
     for region in REGIONS:
+        print(region)
         o_rds_manual = RdsDB(region["Source"], region["Destination"], "manual")
 
         nb_copy_processing = nb_copy_processing + o_rds_manual.get_nb_copy()
@@ -235,6 +234,7 @@ def lambda_handler(event, context):
             return 0
 
         nb_to_copy = o_rds_manual.set_snapshots()
+        #print("nb_to_copy" + str(nb_to_copy))
         if nb_to_copy > 0:
             rds.append(o_rds_manual)
             total_to_copy = total_to_copy + nb_to_copy
@@ -246,6 +246,7 @@ def lambda_handler(event, context):
         o_rds_auto = RdsDB(region["Source"], region["Destination"], "automated")
         
         nb_to_copy = o_rds_auto.set_snapshots()
+        #print("nb_to_copy" + str(nb_to_copy))
         if nb_to_copy > 0:
             rds.append(o_rds_auto)
             total_to_copy = total_to_copy + nb_to_copy
@@ -254,6 +255,7 @@ def lambda_handler(event, context):
         if total_to_copy >= 5 - nb_copy_processing:
             break
 
+    '''
     if total_to_copy == 0:
         events_client = boto3.client('events') 
         events_client.remove_targets( 
@@ -265,7 +267,8 @@ def lambda_handler(event, context):
         events_client.delete_rule( 
             Name="{0}-Trigger".format(context.function_name) 
         )
-
+    '''
+    
     copy_limit = 5 - nb_copy_processing
 
     for n in range (0, i):
@@ -276,4 +279,4 @@ def lambda_handler(event, context):
         print(str(nb_copied) + " snapshots copied.")
 
         copy_limit = copy_limit - nb_copied
-        rds[n].delete_snapshots(DAYS_OF_RETENTION)
+        rds[n].delete_old_snapshots(DAYS_OF_RETENTION)
