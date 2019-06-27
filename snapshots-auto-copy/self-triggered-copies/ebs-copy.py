@@ -44,6 +44,7 @@ def send_email(subject, message):
                 Subject = subject,
                 Message = message
             )
+    print ("Email sent.")
     
 # Returns the number of snapshots being copied at the moment
 def get_nb_copy(client):
