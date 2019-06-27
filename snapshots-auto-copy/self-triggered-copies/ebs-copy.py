@@ -30,6 +30,14 @@ EMAIL_RECIPIENT = "nicolasguilbert.tours@gmail.com"
 EMAIL_REGION = "us-west-2"
 TOPIC_ARN = "arn:aws:sns:us-west-1:728679744102:EmailsToSend"
 
+######################################################################################
+# Boto3 documentation.
+# https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html
+######################################################################################
+# Original function (lots of typos and errors, basically not working)
+# https://timesofcloud.com/aws-lambda-copy-5-snapshots-between-region/
+######################################################################################
+
 class Ec2Instances(object):
     
     def __init__(self, region_source, region_dest):
@@ -338,16 +346,6 @@ class EBSSnapshot(object):
         self.new_snapshot_description = new_description
             
 def lambda_handler(event, context):
-    #ec2_reg = boto3.client('ec2')
-    #regions = ec2_reg.describe_regions()
-    '''
-    for region in regions['Regions']:
-        region_name = region['RegionName']
-        instances = Ec2Instances(region_name)
-        deleted_counts = instances.delete_snapshots(1)
-        print("deleted_counts for region "+ str(region_name) +" is " + str(deleted_counts))
-    return 'completed'
-    '''
     nb_copy_processing = 0
     nb_to_copy = 0
     total_to_copy = 0
@@ -356,13 +354,21 @@ def lambda_handler(event, context):
 
     for region in REGIONS:
         o_ec2 = Ec2Instances(region["Source"], region["Destination"])
+        nb_copy_processing = nb_copy_processing + o_ec2.get_nb_copy()
+
+        if nb_copy_processing >= 5:
+            print("Already 5 snapshots being copied. Waiting for the next call.")
+            return 0
+
         nb_to_copy = o_ec2.set_snapshots()
         if nb_to_copy > 0:
             ec2.append(o_ec2)
             total_to_copy = total_to_copy + nb_to_copy
             #print(ec2[i].get_nb_copy())
-            nb_copy_processing = nb_copy_processing + ec2[i].get_nb_copy()
             i = i + 1
+
+        if total_to_copy >= 5 - nb_copy_processing:
+            break
 
     # If there's no snapshots to copy, destroy the CW event.
     if total_to_copy == 0:
@@ -386,14 +392,7 @@ def lambda_handler(event, context):
         nb_copied = ec2[n].copy_snapshots(copy_limit)
         print(str(nb_copied) + " snapshots copied")
         copy_limit = copy_limit - nb_copied
-        ec2[n].delete_snapshots(14)
+        ec2[n].delete_snapshots(DAYS_OF_RETENTION)
 
-######################################################################################
-# Boto3 documentation.
-# https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html
-######################################################################################
-# Original function (lots of typos and errors, basically not working)
-# https://timesofcloud.com/aws-lambda-copy-5-snapshots-between-region/
-######################################################################################
 
     

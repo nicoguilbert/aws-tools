@@ -244,7 +244,7 @@ def lambda_handler(event, context):
             break
 
         o_rds_auto = RdsDB(region["Source"], region["Destination"], "automated")
-
+        
         nb_copy_processing = nb_copy_processing + o_rds_auto.get_nb_copy()
         if nb_copy_processing >= 5:
             print("Already 5 snapshots being copied. Waiting for the next call.")
