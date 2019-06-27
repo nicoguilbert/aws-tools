@@ -82,7 +82,7 @@ class Ec2Instances(object):
             if already_copied == False:
                 self.snapshots.append(s)
                 n = n + 1
-        
+
         self.sort()
         print(str(n) + " EBS snapshots to copy from " + self.region_source)
         return n
@@ -122,7 +122,7 @@ class Ec2Instances(object):
 
     def copy_snapshots(self, copy_limit):
         n = 0
-        self.set_snapshots()
+        #self.set_snapshots()
         #print(str(self.snapshots))
         for s in self.snapshots:
             new_id = self.copy_snapshot(s)
@@ -348,14 +348,33 @@ def lambda_handler(event, context):
     return 'completed'
     '''
     nb_copy_processing = 0
+    nb_to_copy = 0
+    total_to_copy = 0
     i = 0
     ec2 = []
 
     for region in REGIONS:
-        ec2.append(Ec2Instances(region["Source"], region["Destination"]))
-        print(ec2[i].get_nb_copy())
-        nb_copy_processing = nb_copy_processing + ec2[i].get_nb_copy()
-        i = i + 1
+        o_ec2 = Ec2Instances(region["Source"], region["Destination"])
+        nb_to_copy = o_ec2.set_snapshots()
+        if nb_to_copy > 0:
+            ec2.append(o_ec2)
+            total_to_copy = total_to_copy + nb_to_copy
+            #print(ec2[i].get_nb_copy())
+            nb_copy_processing = nb_copy_processing + ec2[i].get_nb_copy()
+            i = i + 1
+
+    # If there's no snapshots to copy, destroy the CW event.
+    if total_to_copy == 0:
+        events_client = boto3.client('events') 
+        events_client.remove_targets( 
+            Rule="{0}-Trigger".format(context.function_name), 
+            Ids=[ 
+                '1', 
+            ] 
+        ) 
+        events_client.delete_rule( 
+            Name="{0}-Trigger".format(context.function_name) 
+        )
 
     copy_limit = 5 - nb_copy_processing
 
@@ -368,13 +387,11 @@ def lambda_handler(event, context):
         copy_limit = copy_limit - nb_copied
         ec2[n].delete_snapshots(14)
 
-
-
 ######################################################################################
 # Boto3 documentation.
 # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html
 ######################################################################################
-# Original function (lot of typos like double quotes missing)
+# Original function (lots of typos and errors, basically not working)
 # https://timesofcloud.com/aws-lambda-copy-5-snapshots-between-region/
 ######################################################################################
 
