@@ -140,7 +140,6 @@ class RdsDB(object):
         print(str(n) + " RDS snapshots deleted on region " + self.region_dest)
         return n
 
-
 def lambda_handler(event, context):
     lambda_client = boto3.client('lambda')
     events_client = boto3.client('events')
@@ -155,8 +154,9 @@ def lambda_handler(event, context):
     ebs_name = "{0}-Trigger".format(ebs_fn_name)
     rds_name = "{0}-Trigger".format(rds_fn_name)
 
-     
-    # EBS
+    ########
+    # EBS. #
+    ########
     try:
         rule_response = events_client.put_rule(
             Name=ebs_name,
@@ -185,8 +185,15 @@ def lambda_handler(event, context):
             Name=ebs_name
         )
         print("Rule already exists.")
+
+    # deletion
+    for region in REGIONS:
+        ec2 = Ec2Instances(region["Source"], region["Destination"])
+        ec2.delete_snapshots(DAYS_OF_RETENTION)
     
-    # RDS
+    ########
+    # RDS. #
+    ########
     try:
         rds_rule_response = events_client.put_rule(
             Name=rds_name,
@@ -215,3 +222,11 @@ def lambda_handler(event, context):
             Name=rds_name
         )
         print("Rule already exists.") 
+
+    # deletion
+    for region in REGIONS:
+        rds_manual = RdsDB(region["Source"], region["Destination"], "manual")
+        rds_auto = RdsDB(region["Source"], region["Destination"], "auto")
+
+        rds_manual.delete_old_snapshots(DAYS_OF_RETENTION)
+        rds_auto.delete_old_snapshots(DAYS_OF_RETENTION)

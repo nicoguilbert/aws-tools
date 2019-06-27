@@ -346,7 +346,7 @@ def lambda_handler(event, context):
         nb_copied = ec2[n].copy_snapshots(copy_limit)
         print(str(nb_copied) + " snapshots copied")
         copy_limit = copy_limit - nb_copied
-        ec2[n].delete_snapshots(DAYS_OF_RETENTION)
+        #ec2[n].delete_snapshots(DAYS_OF_RETENTION)
 
 
     
