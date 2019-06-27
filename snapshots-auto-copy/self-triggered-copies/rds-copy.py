@@ -18,7 +18,11 @@ REGIONS = [
     {
         "Source" : "us-west-1",
         "Destination" : "us-west-2"
-    }
+    }#,
+    #{
+    #   "Source" : "us-east-2",
+    #   "Destination" : "us-east-1"
+    #}, ....
 ]
 
 ACCOUNT = "728679744102"
@@ -66,7 +70,6 @@ class RdsDB(object):
 
     def sort(self):
         self.snapshots.sort(key=lambda r:r[2], reverse=True)
-
 
     def get_nb_copy(self):
         response = self.client_db_dest.describe_db_snapshots(
@@ -138,7 +141,6 @@ class RdsDB(object):
         print(str(n) + " RDS snapshots to copy in " + self.region_source)
         return n
 
-    
     def copy_snapshot(self, snapshot, copy_name):
         response = self.client_db_dest.copy_db_snapshot(
             SourceDBSnapshotIdentifier='arn:aws:rds:' + self.region_source + ':' + self.aws_account + ':snapshot:' + snapshot[1],
@@ -148,8 +150,6 @@ class RdsDB(object):
         return response
 
     def copy_snapshots(self, copy_limit):    
-        #nb_to_copy = self.set_db_snapshots()
-        
         n = 0
     
         for s in self.snapshots:
@@ -278,7 +278,7 @@ def lambda_handler(event, context):
             break
 
         nb_copied = rds[n].copy_snapshots(copy_limit)
-        print(str(nb_copied) + " snapshots copied")
+        print(str(nb_copied) + " snapshots copied.")
 
         copy_limit = copy_limit - nb_copied
         rds[n].delete_snapshots(DAYS_OF_RETENTION)

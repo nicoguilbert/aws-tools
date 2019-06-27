@@ -17,7 +17,11 @@ REGIONS = [
     {
         "Source" : "us-west-1",
         "Destination" : "us-west-2"
-    }
+    }#,
+    #{
+    #   "Source" : "us-east-2",
+    #   "Destination" : "us-east-1"
+    #}, ....
 ]
 
 ACCOUNT = "728679744102"
@@ -182,13 +186,6 @@ class Ec2Instances(object):
         print(str(delete_snapshots_num) + " snapshots deleted on region " + self.region_dest)
         return delete_snapshots_num
         
-        
-####################################
-####################################
-####################################
-####################################
-####################################
-####################################
 ####################################
 
 class EBSSnapshot(object):
