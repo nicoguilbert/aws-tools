@@ -285,7 +285,7 @@ class EBSSnapshot(object):
         else: 
             # Puts a list in attachments. The list only contains one element
             # Or contains a string
-            attachments = get_volume_attachments(self.volume_id)
+            attachments = self.get_volume_attachments(self.volume_id)
             if attachments == False:
                 new_description = "Volume did not exist. Could not find attachements."
             elif attachments == []:
@@ -293,7 +293,7 @@ class EBSSnapshot(object):
             else:
                 # Puts a dictionnary containing the volume informations inside volume_dict
                 volume_dict = attachments[0]
-                instance_name = "Ec2Name: " + set_instance_name(volume_dict["InstanceId"])
+                instance_name = "Ec2Name: " + self.set_instance_name(volume_dict["InstanceId"])
                 block_device = ", BlockDevice: " + volume_dict["Device"]
                 new_description = new_description + instance_name + block_device + ", RegionSource: " + region_source
 

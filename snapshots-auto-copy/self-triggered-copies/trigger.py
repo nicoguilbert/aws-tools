@@ -32,7 +32,6 @@ EMAIL_RECIPIENT = "nicolasguilbert.tours@gmail.com"
 EMAIL_REGION = "us-west-2"
 TOPIC_ARN = "arn:aws:sns:us-west-1:728679744102:EmailsToSend"
 
-
 class Ec2Instances(object):
 
     def __init__(self, region_source, region_dest):
@@ -45,7 +44,40 @@ class Ec2Instances(object):
         self.sns = boto3.resource('sns')
         self.email_topic = self.sns.Topic(TOPIC_ARN)
         self.snapshots = []
-
+    
+    def get_original_snapshot_id(self, snapshot):
+        for tag in snapshot["Tags"]:
+            if tag["Key"] == "OriginalSnapshotID":
+                return tag["Value"]
+        print("Did not find the OriginalSnapshotID.")
+        return "SnapshotIdError"
+        
+    def original_exists(self, original_snapshot_id):
+        try:
+            response = self.ec2_source.describe_snapshots(
+                Filters=[
+                    { 'Name': 'status', 'Values': [ 'completed' ] }
+                ],
+                SnapshotIds = [
+                    original_snapshot_id,    
+                ],
+                OwnerIds=[ 
+                    self.aws_account, 
+                ],
+            )
+            print(original_snapshot_id + " snapshot still exists. Not deleting its copy.")
+            return True
+        except:
+            print(original_snapshot_id + " snapshot doesn't exist. Deleting its copy.")
+            return False
+            
+    def filter_snapshots_to_delete(self, autocopied_snapshots):
+        for snapshot in autocopied_snapshots["Snapshots"]:
+            original_snapshot_id = self.get_original_snapshot_id(snapshot)
+            if self.original_exists(original_snapshot_id) == True:
+                autocopied_snapshots["Snapshots"].remove(snapshot)
+        return autocopied_snapshots
+                
     def delete_snapshot(self, snapshot_id):
         try:
             self.ec2_dest.delete_snapshot(SnapshotId=snapshot_id)
@@ -72,6 +104,7 @@ class Ec2Instances(object):
         delete_snapshots_num = 0
 
         snapshots = self.get_autocopied_snapshots()
+        snapshots = self.filter_snapshots_to_delete(snapshots)
 
         for snapshot in snapshots['Snapshots']:
             start_time = snapshot['StartTime']
@@ -86,6 +119,7 @@ class Ec2Instances(object):
         print(str(delete_snapshots_num) + " snapshots deleted on region " + self.region_dest)
         return delete_snapshots_num
 
+'''
 class RdsDB(object):
 
     def __init__(self, region_source, region_dest, snap_type):
@@ -139,6 +173,7 @@ class RdsDB(object):
 
         print(str(n) + " RDS snapshots deleted on region " + self.region_dest)
         return n
+'''
 
 def lambda_handler(event, context):
     lambda_client = boto3.client('lambda')
@@ -157,6 +192,7 @@ def lambda_handler(event, context):
     ########
     # EBS. #
     ########
+    '''
     try:
         rule_response = events_client.put_rule(
             Name=ebs_name,
@@ -185,7 +221,7 @@ def lambda_handler(event, context):
             Name=ebs_name
         )
         print("Rule already exists.")
-
+    '''
     # deletion
     for region in REGIONS:
         ec2 = Ec2Instances(region["Source"], region["Destination"])
@@ -194,6 +230,7 @@ def lambda_handler(event, context):
     ########
     # RDS. #
     ########
+    '''
     try:
         rds_rule_response = events_client.put_rule(
             Name=rds_name,
@@ -222,11 +259,13 @@ def lambda_handler(event, context):
             Name=rds_name
         )
         print("Rule already exists.") 
-
+    '''
     # deletion
+    '''
     for region in REGIONS:
         rds_manual = RdsDB(region["Source"], region["Destination"], "manual")
         rds_auto = RdsDB(region["Source"], region["Destination"], "auto")
 
         rds_manual.delete_old_snapshots(DAYS_OF_RETENTION)
         rds_auto.delete_old_snapshots(DAYS_OF_RETENTION)
+    '''
