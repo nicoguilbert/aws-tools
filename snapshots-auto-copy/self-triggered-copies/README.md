@@ -203,7 +203,24 @@ This function needs a Role with at least these permissions :
               "events:EnableRule"
             ],
             "Resource": "*"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "ec2:DescribeSnapshots",
+              "ec2:DeleteSnapshot"
+            ],
+            "Resource": "*"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "rds:DescribeDbSnapshots",
+              "rds:DeleteDbSnapshot"
+            ],
+            "Resource": "*"
           }
+
       ]
   },
 ```
