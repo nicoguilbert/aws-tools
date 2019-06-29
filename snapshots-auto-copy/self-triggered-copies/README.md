@@ -216,7 +216,8 @@ This function needs a Role with at least these permissions :
             "Effect": "Allow",
             "Action": [
               "rds:DescribeDbSnapshots",
-              "rds:DeleteDbSnapshot"
+              "rds:DeleteDbSnapshot",
+              "rds:ListTagsForResource"
             ],
             "Resource": "*"
           }

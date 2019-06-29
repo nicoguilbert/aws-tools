@@ -25,13 +25,14 @@ REGIONS = [
 ACCOUNT = "728679744102"
 
 # How many days do you want to keep the snapshots
-DAYS_OF_RETENTION = 15
+DAYS_OF_RETENTION = 0.001
 
 EMAIL_SENDER = "nicolasguilbert.tours@gmail.com"
 EMAIL_RECIPIENT = "nicolasguilbert.tours@gmail.com"
 EMAIL_REGION = "us-west-2"
 TOPIC_ARN = "arn:aws:sns:us-west-1:728679744102:EmailsToSend"
 
+'''
 class Ec2Instances(object):
 
     def __init__(self, region_source, region_dest):
@@ -70,14 +71,7 @@ class Ec2Instances(object):
         except:
             print(original_snapshot_id + " snapshot doesn't exist. Deleting its copy.")
             return False
-            
-    def filter_snapshots_to_delete(self, autocopied_snapshots):
-        for snapshot in autocopied_snapshots["Snapshots"]:
-            original_snapshot_id = self.get_original_snapshot_id(snapshot)
-            if self.original_exists(original_snapshot_id) == True:
-                autocopied_snapshots["Snapshots"].remove(snapshot)
-        return autocopied_snapshots
-                
+    
     def delete_snapshot(self, snapshot_id):
         try:
             self.ec2_dest.delete_snapshot(SnapshotId=snapshot_id)
@@ -104,22 +98,26 @@ class Ec2Instances(object):
         delete_snapshots_num = 0
 
         snapshots = self.get_autocopied_snapshots()
-        snapshots = self.filter_snapshots_to_delete(snapshots)
-
+        
         for snapshot in snapshots['Snapshots']:
+            original_snapshot_id = self.get_original_snapshot_id(snapshot)
+            if self.original_exists(original_snapshot_id) == True:
+                continue
             start_time = snapshot['StartTime']
             if (start_time < self.get_delete_time(older_days)):
                 try:
                     self.delete_snapshot(snapshot['SnapshotId'])
                     delete_snapshots_num = delete_snapshots_num + 1
                     print("Snapshot " + snapshot['SnapshotId'] + " deleted")
+                    continue
                 except:
                     print ("This snapshot was probably 'InUse' by an Image. Won't be deleted.")
+                    continue
 
         print(str(delete_snapshots_num) + " snapshots deleted on region " + self.region_dest)
         return delete_snapshots_num
-
 '''
+
 class RdsDB(object):
 
     def __init__(self, region_source, region_dest, snap_type):
@@ -173,7 +171,7 @@ class RdsDB(object):
 
         print(str(n) + " RDS snapshots deleted on region " + self.region_dest)
         return n
-'''
+
 
 def lambda_handler(event, context):
     lambda_client = boto3.client('lambda')
@@ -223,10 +221,11 @@ def lambda_handler(event, context):
         print("Rule already exists.")
     '''
     # deletion
+    '''
     for region in REGIONS:
         ec2 = Ec2Instances(region["Source"], region["Destination"])
         ec2.delete_snapshots(DAYS_OF_RETENTION)
-    
+    '''
     ########
     # RDS. #
     ########
