@@ -1,11 +1,14 @@
+################################################################
+# This script copies every snapshot from us-west-2 to us-west-1
+# Python 3.7
+################################################################
+
 import boto3
 import time
 import datetime
 import operator
 import re
 import json
-#from datetime import datetime, timedelta, timezone
-
 
 ######################
 #  Global variables. #
@@ -24,99 +27,22 @@ REGIONS = [
 
 ACCOUNT = "728679744102"
 
-# How many days do you want to keep the snapshots
-DAYS_OF_RETENTION = 0.001
-
 EMAIL_SENDER = "nicolasguilbert.tours@gmail.com"
 EMAIL_RECIPIENT = "nicolasguilbert.tours@gmail.com"
 EMAIL_REGION = "us-west-2"
 TOPIC_ARN = "arn:aws:sns:us-west-1:728679744102:EmailsToSend"
 
-'''
-class Ec2Instances(object):
+# How many days do you want to keep the snapshots
+DAYS_OF_RETENTION = 15
+RETENTION_TIME = DAYS_OF_RETENTION * 86400
 
-    def __init__(self, region_source, region_dest):
-        self.region_source = region_source
-        self.region_dest = region_dest
-        self.aws_account = ACCOUNT
-        self.ec2_source = boto3.client('ec2', region_name=region_source)
-        self.ec2_dest = boto3.client('ec2', region_name=region_dest)
-        self.ec2_resource = boto3.resource('ec2')
-        self.sns = boto3.resource('sns')
-        self.email_topic = self.sns.Topic(TOPIC_ARN)
-        self.snapshots = []
-    
-    def get_original_snapshot_id(self, snapshot):
-        for tag in snapshot["Tags"]:
-            if tag["Key"] == "OriginalSnapshotID":
-                return tag["Value"]
-        print("Did not find the OriginalSnapshotID.")
-        return "SnapshotIdError"
-        
-    def original_exists(self, original_snapshot_id):
-        try:
-            response = self.ec2_source.describe_snapshots(
-                Filters=[
-                    { 'Name': 'status', 'Values': [ 'completed' ] }
-                ],
-                SnapshotIds = [
-                    original_snapshot_id,    
-                ],
-                OwnerIds=[ 
-                    self.aws_account, 
-                ],
-            )
-            print(original_snapshot_id + " snapshot still exists. Not deleting its copy.")
-            return True
-        except:
-            print(original_snapshot_id + " snapshot doesn't exist. Deleting its copy.")
-            return False
-    
-    def delete_snapshot(self, snapshot_id):
-        try:
-            self.ec2_dest.delete_snapshot(SnapshotId=snapshot_id)
-        except:
-            print("Error deleting " + snapshot_id)
-            
-    def get_autocopied_snapshots(self):
-        snapshots = self.ec2_dest.describe_snapshots(
-            Filters=[
-                { 'Name': 'status', 'Values': [ 'completed' ] },
-                { 'Name': 'tag:SnapshotType', 'Values': [ 'AutomatedCopyCrossRegion' ] }
-            ],
-            OwnerIds=[ 
-                self.aws_account, 
-            ],
-        )
-        return snapshots
-
-    def get_delete_time(self, older_days):
-        delete_time = datetime.now(tz=timezone.utc) - timedelta(days=older_days)
-        return delete_time
-
-    def delete_snapshots(self, older_days=15):
-        delete_snapshots_num = 0
-
-        snapshots = self.get_autocopied_snapshots()
-        
-        for snapshot in snapshots['Snapshots']:
-            original_snapshot_id = self.get_original_snapshot_id(snapshot)
-            if self.original_exists(original_snapshot_id) == True:
-                continue
-            start_time = snapshot['StartTime']
-            if (start_time < self.get_delete_time(older_days)):
-                try:
-                    self.delete_snapshot(snapshot['SnapshotId'])
-                    delete_snapshots_num = delete_snapshots_num + 1
-                    print("Snapshot " + snapshot['SnapshotId'] + " deleted")
-                    continue
-                except:
-                    print ("This snapshot was probably 'InUse' by an Image. Won't be deleted.")
-                    continue
-
-        print(str(delete_snapshots_num) + " snapshots deleted on region " + self.region_dest)
-        return delete_snapshots_num
-'''
+######################################################################################
+# Boto3 documentation.
+# https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html
+######################################################################################
+# Original function (lot of typos like double quotes missing)
+# https://timesofcloud.com/aws-lambda-copy-5-snapshots-between-region/
+######################################################################################
 
 class RdsDB(object):
 
@@ -131,162 +57,184 @@ class RdsDB(object):
         self.email_topic = self.sns.Topic(TOPIC_ARN)
         self.snapshots = []
 
-    def get_delete_time(self, older_days=15):
-        delete_time = datetime.datetime.now() - datetime.timedelta(days=older_days)
-        delete_time = delete_time.replace(tzinfo=None)
-        return delete_time
-    
-    def get_original_snapshot_id(self, snapshot_db_arn):
-        response = self.client_db_dest.list_tags_for_resource(
-            ResourceName= snapshot_db_arn,
-        )
-        #print(response)
-        tags = response['TagList']
-        for tag in tags:
-            if tag["Key"] == "OriginalSnapshotID":
-                return tag["Value"]
-        return "original snapshot not Found for snapshot " + snapshot_db_arn
-        
-    def original_exists(self, original_snapshot_id):
-        try:
-            self.client_db_source.describe_db_snapshots(
-                DBSnapshotIdentifier = original_snapshot_id
+    def send_email(self, subject, message):
+        print ("Sending email.")
+        self.email_topic.publish(
+                Subject = subject,
+                Message = message
             )
-            print(original_snapshot_id + " snapshot still exists. Not deleting its copy.")
-            return True
-        except:
-            print(original_snapshot_id + " snapshot doesn't exist. Deleting its copy.")
-            return False
-            
-    
-    def delete_snapshot(self, snapshot_id):
-        self.client_db_dest.delete_db_snapshot(
-                    DBSnapshotIdentifier = snapshot_id
-                )
-        print(snapshot_id + " deleted.")
+        print ("Email sent.")
 
-    def delete_old_snapshots(self, older_days):
-        pattern = re.compile("^sc-")
-        n = 0
-        # DOES NOT WORK FOR AURORA ! ! !
+    def sort(self):
+        self.snapshots.sort(key=lambda r:r[2], reverse=True)
+
+    def get_nb_copy(self):
         response = self.client_db_dest.describe_db_snapshots(
             IncludeShared=False,
             IncludePublic=False
         )
-        if len(response['DBSnapshots']) == 0:
-            print("No snapshot to delete on region " + self.region_dest)
-            return 0
+        snapshots = response['DBSnapshots']
+        nb_copy = 0
+    
+        for snapshot in snapshots:
+            if snapshot["Status"] == 'pending' or snapshot["Status"] == 'creating':
+                nb_copy = nb_copy + 1
+        return nb_copy
 
-        delete_time = self.get_delete_time(older_days)
+    def get_snapshots_to_copy(self):
+        # DOES NOT WORK FOR AURORA ! ! !
+        response = self.client_db_source.describe_db_snapshots(
+            SnapshotType=self.snap_type,
+            IncludeShared=False,
+            IncludePublic=False
+        )
+        return response['DBSnapshots']
 
-        for snapshot in response['DBSnapshots']:
+    def get_copy_name(self, database, snapshot_name, start_time):
+        if self.snap_type == "automated":
+            copy_name = "sc-" + database + "-" + start_time.strftime("%Y-%m-%d-%Hh%Mm")
+        elif self.snap_type == "manual":
+            copy_name = "sc-" + snapshot_name + "-" + start_time.strftime("%Y-%m-%d-%Hh%Mm")
+
+        return copy_name
+
+    def already_copied(self, copy_name):
+        print("Checking if " + copy_name + " is copied")
+
+        try:
+            self.client_db_dest.describe_db_snapshots(
+                DBSnapshotIdentifier=copy_name
+            )
+            print("Already Copied")
+
+            return True
+        except:
+            return False
+    
+    def set_snapshots(self):
+        n = 0
+        snapshots = self.get_snapshots_to_copy()
+        print(snapshots)
+
+        for snapshot in snapshots:
             if snapshot['Status'] != 'available':
                 continue
-            test_match = pattern.match(snapshot['DBSnapshotIdentifier'])
-            if test_match == None:
-                continue
-            
-            original_snapshot_id = self.get_original_snapshot_id(snapshot['DBSnapshotArn'])
-            if self.original_exists(original_snapshot_id) == True:
-                continue
-            start_time = snapshot['SnapshotCreateTime'].replace(tzinfo=None)
-            if start_time < delete_time:
-                print("Processing deletion of snapshot " + snapshot['DBSnapshotIdentifier'])
-                self.delete_snapshot(snapshot['DBSnapshotIdentifier'])
+        
+            database = snapshot["DBInstanceIdentifier"]
+            start_time = snapshot["SnapshotCreateTime"]
+            snapshot_name = snapshot["DBSnapshotIdentifier"]
+
+            ###################################################################
+            # Naming rule for the new snapshot :
+            # Automated => Name of database + Creation date (year-month-day)
+            # Manual    => Name of the snapshot + Creation date 
+            ###################################################################
+        
+            copy_name = self.get_copy_name(database, snapshot_name, start_time)
+            if self.already_copied(copy_name) == False:
+                self.snapshots.append((database, snapshot_name, start_time))
                 n = n + 1
 
-        print(str(n) + " RDS snapshots deleted on region " + self.region_dest)
+        self.sort()
+        print(str(n) + " RDS " + self.snap_type + " snapshots  to copy in " + self.region_source)
         return n
 
+    def copy_snapshot(self, snapshot, copy_name):
+        response = self.client_db_dest.copy_db_snapshot(
+            SourceDBSnapshotIdentifier='arn:aws:rds:' + self.region_source + ':' + self.aws_account + ':snapshot:' + snapshot[1],
+            TargetDBSnapshotIdentifier=copy_name,
+            CopyTags=True
+        )
+        return response
+
+    def copy_snapshots(self, copy_limit):    
+        n = 0
+    
+        for s in self.snapshots:
+            copy_name = self.get_copy_name(s[0], s[1], s[2])
+            response = self.copy_snapshot(s, copy_name)
+
+            if response['DBSnapshot']['Status'] != "pending" and response['DBSnapshot']['Status'] != "available":
+                raise Exception("Copy operation for " + copy_name + " failed!")               
+                
+                self.send_email(
+                    subject = "An Rds Snapshot was not copied",
+                    message = """
+                            {
+                                "sender": "Sender Name  <%s>",
+                                "recipient": "%s",
+                                "aws_region": "%s",
+                                "body": "The copy process of the snapshot %s has failed."
+                            }
+                            """ % (EMAIL_SENDER, EMAIL_RECIPIENT, EMAIL_REGION, copy_name)
+                )
+                continue
+        
+            n = n + 1
+            # if 5 snapshots are already being copied, it returns the number of snapshots left to copy. 
+            if n == copy_limit:
+                break
+        return n
+
+        
 def lambda_handler(event, context):
-    lambda_client = boto3.client('lambda')
-    events_client = boto3.client('events')
+    nb_copy_processing = 0
+    nb_to_copy = 0
+    total_to_copy = 0
+    i = 0
+    rds = []
 
-    ebs_fn_name = "EbsSnapshotCopyCrossRegion"
-    ebs_fn_arn = 'arn:aws:lambda:us-west-1:728679744102:function:EbsSnapshotCopyCrossRegion'
-    
-    rds_fn_name = "RdsSnapshotCopyCrossRegion"
-    rds_fn_arn = 'arn:aws:lambda:us-west-1:728679744102:function:RdsSnapshotCopyCrossRegion'
-    
-    frequency = "rate(2 minutes)"
-    ebs_name = "{0}-Trigger".format(ebs_fn_name)
-    rds_name = "{0}-Trigger".format(rds_fn_name)
-
-    ########
-    # EBS. #
-    ########
-    '''
-    try:
-        rule_response = events_client.put_rule(
-            Name=ebs_name,
-            ScheduleExpression=frequency,
-            State='ENABLED',
-        )   
-        print("Creating rule.")
-        lambda_client.add_permission(
-            FunctionName=ebs_fn_name,
-            StatementId="{0}-Event".format(ebs_name),
-            Action='lambda:InvokeFunction',
-            Principal='events.amazonaws.com',
-            SourceArn=rule_response['RuleArn'],
-        )
-        events_client.put_targets(
-            Rule=ebs_name,
-            Targets=[
-                {
-                    'Id': "1",
-                    'Arn': ebs_fn_arn,
-                },
-            ]
-        )
-    except:
-        rule_response = events_client.enable_rule(
-            Name=ebs_name
-        )
-        print("Rule already exists.")
-    
-    # deletion
     for region in REGIONS:
-        ec2 = Ec2Instances(region["Source"], region["Destination"])
-        ec2.delete_snapshots(DAYS_OF_RETENTION)
-    
-    ########
-    # RDS. #
-    ########
-    try:
-        rds_rule_response = events_client.put_rule(
-            Name=rds_name,
-            ScheduleExpression=frequency,
-            State='ENABLED',
-        )   
-        print("Creating rule.")
-        lambda_client.add_permission(
-            FunctionName=rds_fn_name,
-            StatementId="{0}-Event".format(rds_name),
-            Action='lambda:InvokeFunction',
-            Principal='events.amazonaws.com',
-            SourceArn=rds_rule_response['RuleArn'],
-        )
-        events_client.put_targets(
-            Rule=rds_name,
-                Targets=[
-                {
-                    'Id': "2",
-                    'Arn': rds_fn_arn,
-                },
-                ]
-            )
-    except:
-        rds_rule_response = events_client.enable_rule(
-            Name=rds_name
-        )
-        print("Rule already exists.") 
-    '''
-    
-    # deletion
-    for region in REGIONS:
-        rds_manual = RdsDB(region["Source"], region["Destination"], "manual")
-        rds_auto = RdsDB(region["Source"], region["Destination"], "auto")
+        print(region)
+        o_rds_manual = RdsDB(region["Source"], region["Destination"], "manual")
 
-        rds_manual.delete_old_snapshots(DAYS_OF_RETENTION)
-        rds_auto.delete_old_snapshots(DAYS_OF_RETENTION)
+        nb_copy_processing = nb_copy_processing + o_rds_manual.get_nb_copy()
+        if nb_copy_processing >= 5:
+            print("Already 5 snapshots being copied. Waiting for the next call.")
+            return 0
+
+        nb_to_copy = o_rds_manual.set_snapshots()
+        #print("nb_to_copy" + str(nb_to_copy))
+        if nb_to_copy > 0:
+            rds.append(o_rds_manual)
+            total_to_copy = total_to_copy + nb_to_copy
+            i = i + 1
+
+        if total_to_copy >= 5 - nb_copy_processing:
+            break
+
+        o_rds_auto = RdsDB(region["Source"], region["Destination"], "automated")
+        
+        nb_to_copy = o_rds_auto.set_snapshots()
+        #print("nb_to_copy" + str(nb_to_copy))
+        if nb_to_copy > 0:
+            rds.append(o_rds_auto)
+            total_to_copy = total_to_copy + nb_to_copy
+            i = i + 1
+
+        if total_to_copy >= 5 - nb_copy_processing:
+            break
+
+    if total_to_copy == 0:
+        events_client = boto3.client('events') 
+        events_client.remove_targets( 
+            Rule="{0}-Trigger".format(context.function_name), 
+            Ids=[ 
+                '1', 
+            ] 
+        ) 
+        events_client.delete_rule( 
+            Name="{0}-Trigger".format(context.function_name) 
+        )
+    
+    copy_limit = 5 - nb_copy_processing
+
+    for n in range (0, i):
+        if copy_limit <= 0:
+            break
+
+        nb_copied = rds[n].copy_snapshots(copy_limit)
+        print(str(nb_copied) + " snapshots copied.")
+
+        copy_limit = copy_limit - nb_copied
+        rds[n].delete_old_snapshots(DAYS_OF_RETENTION)

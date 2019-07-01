@@ -4,7 +4,7 @@ import datetime
 import operator
 import re
 import json
-from datetime import datetime, timedelta, timezone
+#from datetime import datetime, timedelta, timezone
 
 
 ######################
@@ -32,7 +32,6 @@ EMAIL_RECIPIENT = "nicolasguilbert.tours@gmail.com"
 EMAIL_REGION = "us-west-2"
 TOPIC_ARN = "arn:aws:sns:us-west-1:728679744102:EmailsToSend"
 
-'''
 class Ec2Instances(object):
 
     def __init__(self, region_source, region_dest):
@@ -116,7 +115,6 @@ class Ec2Instances(object):
 
         print(str(delete_snapshots_num) + " snapshots deleted on region " + self.region_dest)
         return delete_snapshots_num
-'''
 
 class RdsDB(object):
 
@@ -135,7 +133,30 @@ class RdsDB(object):
         delete_time = datetime.datetime.now() - datetime.timedelta(days=older_days)
         delete_time = delete_time.replace(tzinfo=None)
         return delete_time
-
+    
+    def get_original_snapshot_id(self, snapshot_db_arn):
+        response = self.client_db_dest.list_tags_for_resource(
+            ResourceName= snapshot_db_arn,
+        )
+        #print(response)
+        tags = response['TagList']
+        for tag in tags:
+            if tag["Key"] == "OriginalSnapshotID":
+                return tag["Value"]
+        return "original snapshot not Found for snapshot " + snapshot_db_arn
+        
+    def original_exists(self, original_snapshot_id):
+        try:
+            self.client_db_source.describe_db_snapshots(
+                DBSnapshotIdentifier = original_snapshot_id
+            )
+            print(original_snapshot_id + " snapshot still exists. Not deleting its copy.")
+            return True
+        except:
+            print(original_snapshot_id + " snapshot doesn't exist. Deleting its copy.")
+            return False
+            
+    
     def delete_snapshot(self, snapshot_id):
         self.client_db_dest.delete_db_snapshot(
                     DBSnapshotIdentifier = snapshot_id
@@ -162,7 +183,10 @@ class RdsDB(object):
             test_match = pattern.match(snapshot['DBSnapshotIdentifier'])
             if test_match == None:
                 continue
-
+            
+            original_snapshot_id = self.get_original_snapshot_id(snapshot['DBSnapshotArn'])
+            if self.original_exists(original_snapshot_id) == True:
+                continue
             start_time = snapshot['SnapshotCreateTime'].replace(tzinfo=None)
             if start_time < delete_time:
                 print("Processing deletion of snapshot " + snapshot['DBSnapshotIdentifier'])
@@ -171,7 +195,6 @@ class RdsDB(object):
 
         print(str(n) + " RDS snapshots deleted on region " + self.region_dest)
         return n
-
 
 def lambda_handler(event, context):
     lambda_client = boto3.client('lambda')
@@ -190,7 +213,6 @@ def lambda_handler(event, context):
     ########
     # EBS. #
     ########
-    '''
     try:
         rule_response = events_client.put_rule(
             Name=ebs_name,
@@ -219,17 +241,11 @@ def lambda_handler(event, context):
             Name=ebs_name
         )
         print("Rule already exists.")
-    '''
-    # deletion
-    '''
-    for region in REGIONS:
-        ec2 = Ec2Instances(region["Source"], region["Destination"])
-        ec2.delete_snapshots(DAYS_OF_RETENTION)
-    '''
+    
+
     ########
     # RDS. #
     ########
-    '''
     try:
         rds_rule_response = events_client.put_rule(
             Name=rds_name,
@@ -258,13 +274,18 @@ def lambda_handler(event, context):
             Name=rds_name
         )
         print("Rule already exists.") 
-    '''
-    # deletion
-    '''
+    
+    ############
+    # deletion #
+    ############
     for region in REGIONS:
+        #EBS
+        ec2 = Ec2Instances(ebs_region["Source"], ebs_region["Destination"])
+        ec2.delete_snapshots(DAYS_OF_RETENTION)
+        
+        #RDS
         rds_manual = RdsDB(region["Source"], region["Destination"], "manual")
         rds_auto = RdsDB(region["Source"], region["Destination"], "auto")
 
         rds_manual.delete_old_snapshots(DAYS_OF_RETENTION)
         rds_auto.delete_old_snapshots(DAYS_OF_RETENTION)
-    '''

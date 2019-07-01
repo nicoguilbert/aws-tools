@@ -63,12 +63,26 @@ class Ec2Instances(object):
             )
         print ("Email sent.")
     
+    def handle_error(self, resource_type, resource_info, region, error):
+        self.send_email(
+            subject = "EBS Snapshot copy issue",
+            message = """
+                {
+                    "sender": "Sender Name  <%s>",
+                    "recipient":"%s",
+                    "aws_region":"%s",
+                    "body": "Resource Type : %s .\n Resource : %s .\n Region : %s .\n Action : %s .\n Error : %s"
+                }
+            """ % (self.email_sender, self.email_recipient, self.email_region, resource_type, resource_info, region, action, error)
+        )
+        print("Resource Type : %s .\n Resource Id : %s .\n Region : %s .\n Process : %s .\n Error : %s" % (resource_type, resource_info, region, action, error))
+
     def sort(self):
         self.snapshots.sort(key=lambda r:r.start_time, reverse=True)
 
     def get_nb_copy(self):
         response = self.ec2_dest.describe_snapshots(
-            Filters=[{ 'Name': 'status', 'Values': ['pending', 'creating' ]} ],
+            Filters=[{ 'Name': 'status', 'Values': ['pending', 'creating' ] }],
             OwnerIds=[ 
                 self.aws_account, 
             ],
@@ -116,22 +130,14 @@ class Ec2Instances(object):
             new_s.copy_update_tags(old_snapshot)
             return new_s.id
 
-        except Exception as e:
-            print(e)
-            '''
-            self.send_email(
-                subject = "An EBS Snapshot not copied",
-                message = """
-                    {
-                        "sender": "Sender Name  <%s>",
-                        "recipient":"%s",
-                        "aws_region":"%s",
-                        "body": "The snapshot %s encountered  problem during the copy process. The copy did not succeed."
-                    }
-                """ % (EMAIL_SENDER, EMAIL_RECIPIENT, EMAIL_REGION, old_snapshot.id)
+        except Exception as err:
+            self.handle_error(
+                resource_type="EBS Snapshot", 
+                resource_info=old_snapshot.id, 
+                region=self.region_source, 
+                action= "Copy cross region", 
+                error=err
             )
-            '''
-            print("The snapshot {0} encountered  problem during the copy process. The copy did not succeed.".format(old_snapshot.id))
 
     def copy_snapshots(self, copy_limit):
         n = 0
@@ -196,7 +202,7 @@ class EBSSnapshot(object):
     
     def copy_tags(self, tags):
         tag = self.ec2.create_tags(
-                Resources=[str(self.id)],
+                Resources=[ str(self.id) ],
                 Tags=tags
             )
         return tag
@@ -306,6 +312,7 @@ def lambda_handler(event, context):
     i = 0
     ec2 = []
 
+    # Loop for collecting the snapshots to copy and some information
     for region in REGIONS:
         o_ec2 = Ec2Instances(region["Source"], region["Destination"])
         nb_copy_processing = nb_copy_processing + o_ec2.get_nb_copy()
@@ -346,7 +353,6 @@ def lambda_handler(event, context):
         nb_copied = ec2[n].copy_snapshots(copy_limit)
         print(str(nb_copied) + " snapshots copied")
         copy_limit = copy_limit - nb_copied
-        #ec2[n].delete_snapshots(DAYS_OF_RETENTION)
 
 
     
