@@ -53,7 +53,8 @@ This function needs a Role with at least these permissions :
         {
             "Effect": "Allow",
             "Action": [
-                "ec2:DeleteSnapshot"
+                "events:RemoveTargets",
+                "events:DeleteRule"
             ],
             "Resource": "arn:aws:ec2:*"
         },
@@ -128,7 +129,8 @@ This function needs a Role with at least these permissions :
                 "rds:CopyDbSnapshot",
                 "rds:DescribeDbClusters",
                 "rds:DescribeDbClusterSnapshots",
-                "rds:CopyDbClusterSnapshot"
+                "rds:CopyDbClusterSnapshot",
+                "rds:AddTagsToResource"
             ],
             "Resource": "*"
         },
@@ -195,8 +197,8 @@ This function needs a Role with at least these permissions : (Replace us-west-1 
               "lambda:AddPermission"
             ],
             "Resource": [
-              "arn:aws:lambda:us-west-1:728679744102:function:RdsSnapshotCopyCrossRegion",
-              "arn:aws:lambda:us-west-1:728679744102:function:EbsSnapshotCopyCrossRegion"
+              "arn:aws:lambda:*:728679744102:function:RdsSnapshotCopyCrossRegion",
+              "arn:aws:lambda:*:728679744102:function:EbsSnapshotCopyCrossRegion"
               ]
           },
           {
@@ -204,16 +206,41 @@ This function needs a Role with at least these permissions : (Replace us-west-1 
             "Action": [
                 "events:PutRule",
                 "events:PutTargets",
-                "events:EnableRule"
+                "events:EnableRule",
+                "events:DescribeRule"
             ],
-            "Resource": [
-                "arn:aws:events:us-west-1:728679744102:rule/EbsSnapshotCopyCrossRegion-Trigger",
-                "arn:aws:events:us-west-1:728679744102:rule/RdsSnapshotCopyCrossRegion-Trigger"
-            ]
-          }
+            "Resource": "*"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "ec2:DescribeSnapshots",
+              "ec2:DeleteSnapshot"
+            ],
+            "Resource": "*"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "rds:DescribeDbSnapshots",
+              "rds:DeleteDbSnapshot",
+              "rds:ListTagsForResource"
+            ],
+            "Resource": "*"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+                "sns:Publish"
+            ],
+            "Resource": "*"
+        }
       ]
   },
 ```
+
+Don't forget to change the ARN if you have to!
+
 
 ### CloudWatch Event trigger
 
