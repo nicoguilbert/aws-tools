@@ -48,6 +48,9 @@ class Ec2Instances(object):
         self.region_source = region_source
         self.region_dest = region_dest
         self.aws_account = ACCOUNT
+        self.email_sender = EMAIL_SENDER
+        self.email_recipient = EMAIL_RECIPIENT
+        self.email_region = EMAIL_REGION
         self.ec2_source = boto3.client('ec2', region_name=region_source)
         self.ec2_dest = boto3.client('ec2', region_name=region_dest)
         self.ec2_resource = boto3.resource('ec2')
@@ -63,15 +66,15 @@ class Ec2Instances(object):
             )
         print ("Email sent.")
     
-    def handle_error(self, resource_type, resource_info, region, error):
+    def handle_error(self, email_subject, resource_type, resource_info, action, region, error):
         self.send_email(
-            subject = "EBS Snapshot copy issue",
+            subject = email_subject,
             message = """
                 {
                     "sender": "Sender Name  <%s>",
                     "recipient":"%s",
                     "aws_region":"%s",
-                    "body": "Resource Type : %s .\n Resource : %s .\n Region : %s .\n Action : %s .\n Error : %s"
+                    "body": "Resource Type : %s || Resource : %s || Region : %s || Action : %s || Error : %s"
                 }
             """ % (self.email_sender, self.email_recipient, self.email_region, resource_type, resource_info, region, action, error)
         )
@@ -132,6 +135,7 @@ class Ec2Instances(object):
 
         except Exception as err:
             self.handle_error(
+                email_subject="EBS Snapshot copy failed"
                 resource_type="EBS Snapshot", 
                 resource_info=old_snapshot.id, 
                 region=self.region_source, 
@@ -141,8 +145,6 @@ class Ec2Instances(object):
 
     def copy_snapshots(self, copy_limit):
         n = 0
-        #self.set_snapshots()
-        #print(str(self.snapshots))
         for s in self.snapshots:
             new_id = self.copy_snapshot(s)
             print("Snapshot " + str(s.id) + " successfully copied to snapshot " + str(new_id))
@@ -213,7 +215,7 @@ class EBSSnapshot(object):
             tag = self.copy_tags(old_snapshot.tags)
         except:
             self.create_tag('IssueWithTags', 'Colon')
-            print ("This snapshot might contain tags starting by 'aws:'. No way to handle them now.")
+            print ("This snapshot might contain tags starting by 'aws:'. No way to handle them.")
             print (self.id)
         
         # if there was a tag "Name"
@@ -353,6 +355,7 @@ def lambda_handler(event, context):
         nb_copied = ec2[n].copy_snapshots(copy_limit)
         print(str(nb_copied) + " snapshots copied")
         copy_limit = copy_limit - nb_copied
+    
 
 
     

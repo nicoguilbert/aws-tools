@@ -51,6 +51,9 @@ class RdsDB(object):
         self.region_dest = region_dest
         self.snap_type = snap_type
         self.aws_account = ACCOUNT
+        self.email_sender = EMAIL_SENDER
+        self.email_recipient = EMAIL_RECIPIENT
+        self.email_region = EMAIL_REGION
         self.client_db_source = boto3.client("rds", region_name=self.region_source)
         self.client_db_dest = boto3.client("rds", region_name=self.region_dest)
         self.sns = boto3.resource('sns')
@@ -64,6 +67,20 @@ class RdsDB(object):
                 Message = message
             )
         print ("Email sent.")
+
+    def handle_error(self, email_subject, resource_type, resource_info, action, region, error):
+        self.send_email(
+            subject = email_subject,
+            message = """
+                {
+                    "sender": "Sender Name  <%s>",
+                    "recipient":"%s",
+                    "aws_region":"%s",
+                    "body": "Resource Type : %s || Resource : %s || Region : %s || Action : %s || Error : %s"
+                }
+            """ % (self.email_sender, self.email_recipient, self.email_region, resource_type, resource_info, region, action, error)
+        )
+        print("Resource Type : %s .\n Resource Id : %s .\n Region : %s .\n Process : %s .\n Error : %s" % (resource_type, resource_info, region, action, error))
 
     def sort(self):
         self.snapshots.sort(key=lambda r:r[2], reverse=True)
@@ -157,16 +174,13 @@ class RdsDB(object):
             if response['DBSnapshot']['Status'] != "pending" and response['DBSnapshot']['Status'] != "available":
                 raise Exception("Copy operation for " + copy_name + " failed!")               
                 
-                self.send_email(
-                    subject = "An Rds Snapshot was not copied",
-                    message = """
-                            {
-                                "sender": "Sender Name  <%s>",
-                                "recipient": "%s",
-                                "aws_region": "%s",
-                                "body": "The copy process of the snapshot %s has failed."
-                            }
-                            """ % (EMAIL_SENDER, EMAIL_RECIPIENT, EMAIL_REGION, copy_name)
+                self.handle_error(
+                    email_subject="RDS Snapshot copy failed"
+                    resource_type="RDS Snapshot", 
+                    resource_info=copy_name, 
+                    region=self.region_source, 
+                    action= "Copy cross region", 
+                    error=str(response)
                 )
                 continue
         
@@ -185,7 +199,6 @@ def lambda_handler(event, context):
     rds = []
 
     for region in REGIONS:
-        print(region)
         o_rds_manual = RdsDB(region["Source"], region["Destination"], "manual")
 
         nb_copy_processing = nb_copy_processing + o_rds_manual.get_nb_copy()
@@ -237,4 +250,3 @@ def lambda_handler(event, context):
         print(str(nb_copied) + " snapshots copied.")
 
         copy_limit = copy_limit - nb_copied
-        rds[n].delete_old_snapshots(DAYS_OF_RETENTION)
