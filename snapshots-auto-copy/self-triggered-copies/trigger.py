@@ -4,8 +4,6 @@ import datetime
 import operator
 import re
 import json
-#from datetime import datetime, timedelta, timezone
-
 
 ######################
 #  Global variables. #
@@ -25,12 +23,46 @@ REGIONS = [
 ACCOUNT = "728679744102"
 
 # How many days do you want to keep the snapshots
-DAYS_OF_RETENTION = 0.001
+DAYS_OF_RETENTION = 15
 
 EMAIL_SENDER = "nicolasguilbert.tours@gmail.com"
 EMAIL_RECIPIENT = "nicolasguilbert.tours@gmail.com"
 EMAIL_REGION = "us-west-2"
 TOPIC_ARN = "arn:aws:sns:us-west-1:728679744102:EmailsToSend"
+SNS = boto3.resource('sns')
+EMAIL_TOPIC = SNS.Topic(TOPIC_ARN)
+
+ebs_fn_name = "EbsSnapshotCopyCrossRegion"
+ebs_fn_arn = 'arn:aws:lambda:us-west-1:728679744102:function:EbsSnapshotCopyCrossRegion'
+    
+rds_fn_name = "RdsSnapshotCopyCrossRegion"
+rds_fn_arn = 'arn:aws:lambda:us-west-1:728679744102:function:RdsSnapshotCopyCrossRegion'
+    
+frequency = "rate(2 minutes)"
+ebs_name = "{0}-Trigger".format(ebs_fn_name)
+rds_name = "{0}-Trigger".format(rds_fn_name)
+
+def send_email(subject, message):
+    print ("Sending email.")
+    EMAIL_TOPIC.publish(
+        Subject = subject,
+        Message = message
+    )
+    print ("Email sent.")
+    
+def handle_error(email_subject, resource_type, resource_info, action, region, error):
+    send_email(
+        subject = email_subject,
+        message = """
+            {
+                "sender": "Sender Name  <%s>",
+                "recipient":"%s",
+                "aws_region":"%s",
+                "body": "Resource Type : %s || Resource : %s || Region : %s || Action : %s || Error : %s"
+            }
+            """ % (EMAIL_SENDER, EMAIL_RECIPIENT, EMAIL_REGION, resource_type, resource_info, region, action, error)
+        )
+    print("Resource Type : %s .\n Resource Id : %s .\n Region : %s .\n Process : %s .\n Error : %s" % (resource_type, resource_info, region, action, error))
 
 class Ec2Instances(object):
 
@@ -118,10 +150,9 @@ class Ec2Instances(object):
 
 class RdsDB(object):
 
-    def __init__(self, region_source, region_dest, snap_type):
+    def __init__(self, region_source, region_dest):
         self.region_source = region_source
         self.region_dest = region_dest
-        self.snap_type = snap_type
         self.aws_account = ACCOUNT
         self.client_db_source = boto3.client("rds", region_name=self.region_source)
         self.client_db_dest = boto3.client("rds", region_name=self.region_dest)
@@ -143,7 +174,7 @@ class RdsDB(object):
         for tag in tags:
             if tag["Key"] == "OriginalSnapshotID":
                 return tag["Value"]
-        return "original snapshot not Found for snapshot " + snapshot_db_arn
+        return "Original snapshot not found"
         
     def original_exists(self, original_snapshot_id):
         try:
@@ -185,8 +216,11 @@ class RdsDB(object):
                 continue
             
             original_snapshot_id = self.get_original_snapshot_id(snapshot['DBSnapshotArn'])
-            if self.original_exists(original_snapshot_id) == True:
+            if original_snapshot_id == "Original snapshot not found":
                 continue
+            elif self.original_exists(original_snapshot_id) == True:
+                continue
+                
             start_time = snapshot['SnapshotCreateTime'].replace(tzinfo=None)
             if start_time < delete_time:
                 print("Processing deletion of snapshot " + snapshot['DBSnapshotIdentifier'])
@@ -200,32 +234,46 @@ def lambda_handler(event, context):
     lambda_client = boto3.client('lambda')
     events_client = boto3.client('events')
 
-    ebs_fn_name = "EbsSnapshotCopyCrossRegion"
-    ebs_fn_arn = 'arn:aws:lambda:us-west-1:728679744102:function:EbsSnapshotCopyCrossRegion'
-    
-    rds_fn_name = "RdsSnapshotCopyCrossRegion"
-    rds_fn_arn = 'arn:aws:lambda:us-west-1:728679744102:function:RdsSnapshotCopyCrossRegion'
-    
-    frequency = "rate(2 minutes)"
-    ebs_name = "{0}-Trigger".format(ebs_fn_name)
-    rds_name = "{0}-Trigger".format(rds_fn_name)
-
     ########
     # EBS. #
     ########
     try:
+        response_test = events_client.describe_rule(
+            Name=ebs_name
+        )
+        handle_error(
+            email_subject="EBS Snapshot CloudWatch still running!",
+            resource_type="EBS copy function", 
+            resource_info="Error happened in trigger function", 
+            region="N/A", 
+            action= "Trigger", 
+            error="The EBS copy function is still running 24 hours later !"
+        )
+        print("EBS rule still exists")
+        print(response_test)
+    
+    except:
         rule_response = events_client.put_rule(
             Name=ebs_name,
             ScheduleExpression=frequency,
             State='ENABLED',
         )   
         print("Creating rule.")
-        lambda_client.add_permission(
-            FunctionName=ebs_fn_name,
-            StatementId="{0}-Event".format(ebs_name),
-            Action='lambda:InvokeFunction',
-            Principal='events.amazonaws.com',
-            SourceArn=rule_response['RuleArn'],
+        try:    
+            lambda_client.add_permission(
+                FunctionName=ebs_fn_name,
+                StatementId="{0}-Event".format(ebs_name),
+                Action='lambda:InvokeFunction',
+                Principal='events.amazonaws.com',
+                SourceArn=rule_response['RuleArn'],
+            )
+            print("Add permission.")
+
+        except:
+            print("No add permission.")
+        
+        rule_response = events_client.enable_rule(
+            Name=ebs_name
         )
         events_client.put_targets(
             Rule=ebs_name,
@@ -236,56 +284,67 @@ def lambda_handler(event, context):
                 },
             ]
         )
-    except:
-        rule_response = events_client.enable_rule(
-            Name=ebs_name
-        )
-        print("Rule already exists.")
     
-
     ########
     # RDS. #
     ########
     try:
+        response_test_rds = events_client.describe_rule(
+            Name=rds_name
+        )
+        handle_error(
+            email_subject="RDS Snapshot CloudWatch still running!",
+            resource_type="RDS copy function", 
+            resource_info="Error happened in trigger function", 
+            region="N/A", 
+            action= "Trigger", 
+            error="The RDS copy function is still running 24 hours later !"
+        )
+        print("RDS rule still exists")
+        print(response_test_rds)
+    
+    except:
         rds_rule_response = events_client.put_rule(
             Name=rds_name,
             ScheduleExpression=frequency,
             State='ENABLED',
-        )   
+        )  
         print("Creating rule.")
-        lambda_client.add_permission(
-            FunctionName=rds_fn_name,
-            StatementId="{0}-Event".format(rds_name),
-            Action='lambda:InvokeFunction',
-            Principal='events.amazonaws.com',
-            SourceArn=rds_rule_response['RuleArn'],
+        try:
+            lambda_client.add_permission(
+                FunctionName=rds_fn_name,
+                StatementId="{0}-Event".format(rds_name),
+                Action='lambda:InvokeFunction',
+                Principal='events.amazonaws.com',
+                SourceArn=rds_rule_response['RuleArn'],
+            )
+            print("Add permission")
+        except:
+            print("No Add permission")
+    
+        rds_rule_response = events_client.enable_rule(
+            Name=rds_name
         )
         events_client.put_targets(
             Rule=rds_name,
-                Targets=[
+            Targets=[
                 {
                     'Id': "2",
                     'Arn': rds_fn_arn,
                 },
-                ]
-            )
-    except:
-        rds_rule_response = events_client.enable_rule(
-            Name=rds_name
+            ]
         )
         print("Rule already exists.") 
-    
+
     ############
     # deletion #
     ############
+
     for region in REGIONS:
         #EBS
-        ec2 = Ec2Instances(ebs_region["Source"], ebs_region["Destination"])
-        ec2.delete_snapshots(DAYS_OF_RETENTION)
+        o_ec2 = Ec2Instances(region["Source"], region["Destination"])
+        o_ec2.delete_snapshots(DAYS_OF_RETENTION)
         
         #RDS
-        rds_manual = RdsDB(region["Source"], region["Destination"], "manual")
-        rds_auto = RdsDB(region["Source"], region["Destination"], "auto")
-
-        rds_manual.delete_old_snapshots(DAYS_OF_RETENTION)
-        rds_auto.delete_old_snapshots(DAYS_OF_RETENTION)
+        o_rds = RdsDB(region["Source"], region["Destination"])
+        o_rds.delete_old_snapshots(DAYS_OF_RETENTION)

@@ -8,7 +8,7 @@ The copy functions will disable the CloudWatch rule when they are done copying s
 
 # Setup
  
-*Feel free to change the names of the functions but make sure to change the ARN too if you do. You should also be careful with the resources the permissions are targeted to.*
+*I strongly recommend you do not change the names of the functions because they are used everywhere to link the functions between them.*
 
 ## EbsSnapshotCopyCrossRegion
 
@@ -53,23 +53,17 @@ This function needs a Role with at least these permissions :
         {
             "Effect": "Allow",
             "Action": [
-                "ec2:DeleteSnapshot"
+                "events:RemoveTargets",
+                "events:DeleteRule"
             ],
-            "Resource": "arn:aws:ec2:us-west-2:728679744102:*"
-        },
-        {
-            "Effect": "Allow",
-            "Action": [
-                "events:DisableRule"
-            ],
-            "Resource": "arn:aws:events:us-west-1:728679744102:rule/EbsSnapshotCopyCrossRegion-Trigger"
+            "Resource": "*"
         },
         {
             "Effect": "Allow",
             "Action": [
                 "sns:Publish"
             ],
-            "Resource": "arn:aws:sns:us-west-1:728679744102:EmailsToSend"
+            "Resource": "*""
         }
     ]
 }
@@ -127,30 +121,25 @@ This function needs a Role with at least these permissions :
                 "rds:CopyDbSnapshot",
                 "rds:DescribeDbClusters",
                 "rds:DescribeDbClusterSnapshots",
-                "rds:CopyDbClusterSnapshot"
+                "rds:CopyDbClusterSnapshot",
+                "rds:AddTagsToResource"
             ],
             "Resource": "*"
         },
         {
             "Effect": "Allow",
             "Action": [
-                "rds:DeleteDbSnapshot"
+                "events:RemoveTargets",
+                "events:DeleteRule"
             ],
-            "Resource": "arn:aws:rds:us-west-2:728679744102:*"
-        },
-        {
-            "Effect": "Allow",
-            "Action": [
-                "events:DisableRule"
-            ],
-            "Resource": "arn:aws:events:us-west-1:728679744102:rule/RdsSnapshotCopyCrossRegion-Trigger"
+            "Resource": "*"
         },
         {
             "Effect": "Allow",
             "Action": [
                 "sns:Publish"
             ],
-            "Resource": "arn:aws:sns:us-west-1:728679744102:EmailsToSend"
+            "Resource": "*"
         }
     ]
 }
@@ -193,14 +182,17 @@ This function needs a Role with at least these permissions :
               "lambda:AddPermission"
             ],
             "Resource": [
-              "arn:aws:lambda:us-west-1:728679744102:function:RdsSnapshotCopyCrossRegion",
-              "arn:aws:lambda:us-west-1:728679744102:function:EbsSnapshotCopyCrossRegion"
+              "arn:aws:lambda:*:728679744102:function:RdsSnapshotCopyCrossRegion",
+              "arn:aws:lambda:*:728679744102:function:EbsSnapshotCopyCrossRegion"
               ]
           },
           {
             "Effect": "Allow",
             "Action": [
-              "events:EnableRule"
+                "events:PutRule",
+                "events:PutTargets",
+                "events:EnableRule",
+                "events:DescribeRule"
             ],
             "Resource": "*"
           },
@@ -220,11 +212,20 @@ This function needs a Role with at least these permissions :
               "rds:ListTagsForResource"
             ],
             "Resource": "*"
-          }
-
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+                "sns:Publish"
+            ],
+            "Resource": "*"
+        }
       ]
   },
 ```
+
+Don't forget to change the ARN if you have to!
+
 
 ### CloudWatch Event trigger
 

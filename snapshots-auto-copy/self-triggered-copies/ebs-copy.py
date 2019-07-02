@@ -21,7 +21,8 @@ REGIONS = [
     #{
     #   "Source" : "us-east-2",
     #   "Destination" : "us-east-1"
-    #}, ....
+    #},
+    # etcetera
 ]
 
 ACCOUNT = "728679744102"
@@ -42,6 +43,19 @@ TOPIC_ARN = "arn:aws:sns:us-west-1:728679744102:EmailsToSend"
 # https://timesofcloud.com/aws-lambda-copy-5-snapshots-between-region/
 ######################################################################################
 
+# Object independant function
+def delete_rule(context):
+        events_client = boto3.client('events') 
+        events_client.remove_targets( 
+            Rule="{0}-Trigger".format(context.function_name), 
+            Ids=[ 
+                '1', 
+            ] 
+        ) 
+        events_client.delete_rule( 
+            Name="{0}-Trigger".format(context.function_name) 
+        )
+        
 class Ec2Instances(object):
     
     def __init__(self, region_source, region_dest):
@@ -90,7 +104,9 @@ class Ec2Instances(object):
                 self.aws_account, 
             ],
         )
-        return len(response["Snapshots"])
+        nb_copy = len(response["Snapshots"])
+        print(str(nb_copy) + " snapshots copying on " + self.region_dest)
+        return nb_copy
 
     def get_snapshots(self):
         response = self.ec2_source.describe_snapshots(
@@ -135,13 +151,14 @@ class Ec2Instances(object):
 
         except Exception as err:
             self.handle_error(
-                email_subject="EBS Snapshot copy failed"
+                email_subject="EBS Snapshot copy failed",
                 resource_type="EBS Snapshot", 
                 resource_info=old_snapshot.id, 
                 region=self.region_source, 
                 action= "Copy cross region", 
                 error=err
             )
+            return 
 
     def copy_snapshots(self, copy_limit):
         n = 0
@@ -161,6 +178,13 @@ class EBSSnapshot(object):
         self.region_source = region_source
         self.snapshot_client = self.ec2_resource.Snapshot(snapshot_id) 
         self.id = snapshot_id
+        self.name = ""
+        self.instance_name = ""
+        self.new_snapshot_description = ""
+        if region_source != None:
+            self.region_source = region_source
+        if region_dest != None:
+            self.region_dest = region_dest
         if just_created == False:
             self.volume_id = self.snapshot_client.volume_id
             self.description = self.snapshot_client.description
@@ -171,13 +195,6 @@ class EBSSnapshot(object):
             self.description = ""
             self.start_time = ""
             self.tags = ""
-        self.name = ""
-        self.instance_name = ""
-        self.new_snapshot_description = ""
-        if region_source != None:
-            self.region_source = region_source
-        if region_dest != None:
-            self.region_dest = region_dest
 
     def create_tag(self, key, value):
         print ("Creating tag - " + key + ":" + value + ", snapshot_id: " + str(self.id))
@@ -335,16 +352,7 @@ def lambda_handler(event, context):
 
     # If there's no snapshots to copy, destroy the CW event.
     if total_to_copy == 0:
-        events_client = boto3.client('events') 
-        events_client.remove_targets( 
-            Rule="{0}-Trigger".format(context.function_name), 
-            Ids=[ 
-                '1', 
-            ] 
-        ) 
-        events_client.delete_rule( 
-            Name="{0}-Trigger".format(context.function_name) 
-        )
+        delete_rule(context)
 
     copy_limit = 5 - nb_copy_processing
 
@@ -355,7 +363,3 @@ def lambda_handler(event, context):
         nb_copied = ec2[n].copy_snapshots(copy_limit)
         print(str(nb_copied) + " snapshots copied")
         copy_limit = copy_limit - nb_copied
-    
-
-
-    
