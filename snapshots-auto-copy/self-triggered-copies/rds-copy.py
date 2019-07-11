@@ -4,6 +4,7 @@
 ################################################################
 
 import boto3
+import botocore
 import time
 import datetime
 import operator
@@ -14,7 +15,7 @@ import json
 #  Global variables. #
 ######################
 
-REGIONS = [
+COPY_DEFINITIONS = [
     {
         "Source" : "us-west-1",
         "Destination" : "us-west-2"
@@ -44,7 +45,7 @@ RETENTION_TIME = DAYS_OF_RETENTION * 86400
 # https://timesofcloud.com/aws-lambda-copy-5-snapshots-between-region/
 ######################################################################################
 
-# Object independant function
+# Global function
 def delete_rule(context):
         events_client = boto3.client('events') 
         events_client.remove_targets( 
@@ -57,21 +58,26 @@ def delete_rule(context):
             Name="{0}-Trigger".format(context.function_name) 
         )
 
-class RdsDB(object):
+class RdsWorkUnit(object):
+    ''' This class represents a work unit for processing the copy of the snapshots on various regions.
+    '''
 
     def __init__(self, region_source, region_dest, snap_type):
         self.region_source = region_source
         self.region_dest = region_dest
         self.snap_type = snap_type
+
         self.aws_account = ACCOUNT
         self.email_sender = EMAIL_SENDER
         self.email_recipient = EMAIL_RECIPIENT
         self.email_region = EMAIL_REGION
+
         self.client_db_source = boto3.client("rds", region_name=self.region_source)
         self.client_db_dest = boto3.client("rds", region_name=self.region_dest)
         self.sns = boto3.resource('sns')
         self.email_topic = self.sns.Topic(TOPIC_ARN)
-        self.snapshots = []
+
+        self.snapshots_list = []
 
     def send_email(self, subject, message):
         print ("Sending email.")
@@ -95,7 +101,7 @@ class RdsDB(object):
         )
         print("Resource Type : %s .\n Resource Id : %s .\n Region : %s .\n Process : %s .\n Error : %s" % (resource_type, resource_info, region, action, error))
 
-    def add_tag(self, key, value, copy_name):
+    def add_tag_to_snapshot(self, key, value, copy_name):
         response = self.client_db_dest.add_tags_to_resource(
             ResourceName=copy_name,
             Tags=[
@@ -106,23 +112,9 @@ class RdsDB(object):
             ]
         )
 
-    def sort(self):
-        self.snapshots.sort(key=lambda r:r[2], reverse=True)
+    def sort_snapshots_by_time(self):
+        self.snapshots_list.sort(key=lambda r:r[2], reverse=True)
         print("### List sorted.")
-
-    def get_nb_copy(self):
-        response = self.client_db_dest.describe_db_snapshots(
-            IncludeShared=False,
-            IncludePublic=False
-        )
-        snapshots = response['DBSnapshots']
-        nb_copy = 0
-    
-        for snapshot in snapshots:
-            if snapshot["Status"] == 'pending' or snapshot["Status"] == 'creating':
-                nb_copy = nb_copy + 1
-        print(str(nb_copy) + " snapshots copying on " + self.region_dest)
-        return nb_copy
 
     def get_snapshots_to_copy(self):
         # DOES NOT WORK FOR AURORA ! ! !
@@ -141,7 +133,7 @@ class RdsDB(object):
 
         return copy_name
 
-    def already_copied(self, copy_name):
+    def is_copied(self, copy_name):
         print("Checking if " + copy_name + " is copied")
 
         try:
@@ -154,8 +146,8 @@ class RdsDB(object):
         except:
             return False
     
-    def set_snapshots(self):
-        n = 0
+    def init_snapshots_list(self):
+        nb_snapshots_to_copy = 0
         snapshots = self.get_snapshots_to_copy()
 
         for snapshot in snapshots:
@@ -173,108 +165,88 @@ class RdsDB(object):
             ###################################################################
         
             copy_name = self.get_copy_name(database, snapshot_name, start_time)
-            if self.already_copied(copy_name) == False:
-                self.snapshots.append((database, snapshot_name, start_time))
-                n = n + 1
+            
+            if self.is_copied(copy_name) == False:
+                self.snapshots_list.append((database, snapshot_name, start_time))
+                nb_snapshots_to_copy = nb_snapshots_to_copy + 1
 
-        self.sort()
-        print(str(n) + " RDS " + self.snap_type + " snapshots to copy in " + self.region_source)
-        return n
+        self.sort_snapshots_by_time()
+
+        print(str(nb_snapshots_to_copy) + " RDS " + self.snap_type + " snapshots to copy in " + self.region_source)
+        return nb_snapshots_to_copy
 
     def copy_snapshot(self, snapshot, copy_name):
-        response = self.client_db_dest.copy_db_snapshot(
-            SourceDBSnapshotIdentifier='arn:aws:rds:' + self.region_source + ':' + self.aws_account + ':snapshot:' + snapshot[1],
-            TargetDBSnapshotIdentifier=copy_name,
-            CopyTags=True
-        )
-        return response
+        try:
+            response = self.client_db_dest.copy_db_snapshot(
+                SourceDBSnapshotIdentifier='arn:aws:rds:' + self.region_source + ':' + self.aws_account + ':snapshot:' + snapshot[1],
+                TargetDBSnapshotIdentifier=copy_name,
+                CopyTags=True
+            )
+            return response
 
-    def copy_snapshots(self, copy_limit):    
-        n = 0
-    
-        for s in self.snapshots:
-            copy_name = self.get_copy_name(s[0], s[1], s[2])
-            response = self.copy_snapshot(s, copy_name)
+        except botocore.exceptions.ClientError as err:
+            print("Snapshots copy limit reached on that region.")
+            return "CopyLimitException"
 
-            if response['DBSnapshot']['Status'] != "pending" and response['DBSnapshot']['Status'] != "available":
-                print("Error : Copy operation for " + copy_name + " failed!") 
-                print(response)              
-                
-                self.handle_error(
+        except Exception as err:
+            self.handle_error(
                     email_subject="RDS Snapshot copy failed",
                     resource_type="RDS Snapshot", 
                     resource_info=copy_name, 
                     region=self.region_source, 
                     action= "Copy cross region", 
-                    error=str(response)
+                    error=str(err)
                 )
+            print(err)
+            return "Error"
+
+    def copy_snapshots(self):    
+        nb_snapshots_copied = 0
+    
+        for s in self.snapshots_list:
+            # s[0] : db name, s[1] : snapshot name, s[2] : start_time
+            copy_name = self.get_copy_name(s[0], s[1], s[2])
+            copy_response = self.copy_snapshot(s, copy_name)
+
+            if copy_response == "CopyLimitException":
+                return copy_response
+
+            if copy_response == "Error":
                 continue
             
-            n = n + 1
-            self.add_tag("OriginalSnapshotID", s[1], response["DBSnapshot"]["DBSnapshotArn"])
+            nb_snapshots_copied = nb_snapshots_copied + 1
+            self.add_tag_to_snapshot("OriginalSnapshotID", s[1], copy_response["DBSnapshot"]["DBSnapshotArn"])
             print("Snapshot " + copy_name + " successfully copied on region " + self.region_dest)
-            # if 5 snapshots are already being copied, it returns the number of snapshots left to copy. 
-            if n == copy_limit:
-                break
-        return n
+
+        print("No more snapshots to copy on " + str(self.region_source))
+        return True
 
 def lambda_handler(event, context):
-    nb_copy_processing = 0
-    nb_to_copy = 0
-    total_to_copy = 0
-    i = 0
-    rds = []
+    delete_rule_flag = True
 
-    for region in REGIONS:
+    for copy_order in COPY_DEFINITIONS:
         ####################
         # manual snapshots #
         ####################
-        o_rds_manual = RdsDB(region["Source"], region["Destination"], "manual")
+        manual_work_unit = RdsWorkUnit(copy_order["Source"], copy_order["Destination"], "manual")
+        manual_work_unit.init_snapshots_list()
+        copy_response = manual_work_unit.copy_snapshots()
 
-        nb_copy_processing = nb_copy_processing + o_rds_manual.get_nb_copy()
-        if nb_copy_processing >= 5:
-            print("Already 5 snapshots being copied. Waiting for the next call.")
-            return 0
-
-        nb_to_copy = o_rds_manual.set_snapshots()
-        #print("nb_to_copy" + str(nb_to_copy))
-        if nb_to_copy > 0:
-            rds.append(o_rds_manual)
-            total_to_copy = total_to_copy + nb_to_copy
-            i = i + 1
-
-        if total_to_copy >= 5 - nb_copy_processing:
-            break
+        if copy_response == "CopyLimitException":
+            delete_rule_flag = False
 
         #######################
         # automated snapshots #
         #######################
-        o_rds_auto = RdsDB(region["Source"], region["Destination"], "automated")
-        
-        nb_to_copy = o_rds_auto.set_snapshots()
-        #print("nb_to_copy" + str(nb_to_copy))
-        if nb_to_copy > 0:
-            rds.append(o_rds_auto)
-            total_to_copy = total_to_copy + nb_to_copy
-            i = i + 1
+        automated_work_unit = RdsWorkUnit(copy_order["Source"], copy_order["Destination"], "automated")
+        automated_work_unit.init_snapshots_list()
+        copy_response = automated_work_unit.copy_snapshots()
 
-        if total_to_copy >= 5 - nb_copy_processing:
-            break
-
+        if copy_response == "CopyLimitException":
+            delete_rule_flag = False
+    
     # If there's nothing to copy, it deletes the cloudwatch rule
-    if total_to_copy == 0:
+    if delete_rule_flag == True:
         print("delete_rule")
         delete_rule(context)
-    
-    copy_limit = 5 - nb_copy_processing
-    
-    nb_copied = 0
-    # Launches copy process
-    for n in range (0, i):
-        if copy_limit <= 0:
-            break
 
-        nb_copied = rds[n].copy_snapshots(copy_limit)
-
-        copy_limit = copy_limit - nb_copied
-    print(str(nb_copied) + " snapshots copied.")
