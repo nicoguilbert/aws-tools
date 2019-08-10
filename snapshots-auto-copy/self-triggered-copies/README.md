@@ -4,7 +4,11 @@ Once everything is setup, this application will manage the copy of the snapshots
 The main Lambda function will be triggered everyday by an AWS CloudWatch Event. This function will check if some snapshots need to be copied. 
 If so, it will create a CloudWatch Event that will trigger the EBS and RDS snapshots copy functions with a rate you can decide. &nbsp;
 
-The copy functions will disable the CloudWatch rule when they are done copying snapshots.
+The copy functions will delete the CloudWatch rule when they are done copying snapshots.
+
+# Diagram 
+
+![Project architecture](img/architecture.png)
 
 # Setup
  
@@ -21,6 +25,10 @@ Function Name   |  Runtime
 EbsSnapshotCopyCrossRegion | Python 3.7
 
 ### Role
+
+Permissions > Create role with basic Lambda permissions > Create Function. &nbsp;
+
+In the dashboard of the function : Execution Role > View the {...} role > Add Inline policy > JSON > *CopyPaste these permissions*
 
 This function needs a Role with at least these permissions :
 
@@ -53,18 +61,11 @@ This function needs a Role with at least these permissions :
         {
             "Effect": "Allow",
             "Action": [
+                "lambda:RemovePermission",
                 "events:RemoveTargets",
                 "events:DeleteRule"
             ],
-            "Resource": "arn:aws:ec2:*"
-        },
-        {
-            "Effect": "Allow",
-            "Action": [
-                "events:RemoveTargets",
-                "events:DeleteRule"
-            ],
-            "Resource": "arn:aws:events:*"
+            "Resource": "*"
         },
         {
             "Effect": "Allow",
@@ -76,10 +77,6 @@ This function needs a Role with at least these permissions :
     ]
 }
 ```
-
-Permissions > Create role with basic Lambda permissions > Create Function. &nbsp;
-
-In the dashboard of the function : Execution Role > View the {...} role > Add Inline policy > JSON > *CopyPaste these permissions*
 
 ### Code
 
@@ -93,8 +90,6 @@ Set the timeout to 1 minute. The usual duration of the function is less than 30 
 
 You can let unchanged the other parameters.
 
-http://asvignesh.in/aws-lambda-delete-old-ebs-snapshots-using-boto3/
-
 ## Lambda function : RdsSnapshotCopyCrossRegion
 
 Go to the AWS Console > Lambda. &nbsp;
@@ -106,6 +101,10 @@ Function Name   |  Runtime
 RdsSnapshotCopyCrossRegion | Python 3.7
 
 ### Role
+
+Permissions > Create role with basic Lambda permissions > Create Function. &nbsp;
+
+In the dashboard of the function : Execution Role > View the {...} role > Add Inline policy > JSON > *CopyPaste these permissions*
 
 This function needs a Role with at least these permissions :
 
@@ -130,24 +129,19 @@ This function needs a Role with at least these permissions :
                 "rds:DescribeDbClusters",
                 "rds:DescribeDbClusterSnapshots",
                 "rds:CopyDbClusterSnapshot",
-                "rds:AddTagsToResource"
+                "rds:AddTagsToResource",
+                "rds:DescribeDBInstances"
             ],
             "Resource": "*"
         },
         {
             "Effect": "Allow",
             "Action": [
-                "rds:DeleteDbSnapshot"
-            ],
-            "Resource": "arn:aws:ec2:*"
-        },
-        {
-            "Effect": "Allow",
-            "Action": [
+                "lambda:RemovePermission",
                 "events:RemoveTargets",
                 "events:DeleteRule"
             ],
-            "Resource": "arn:aws:events:*"
+            "Resource": "*"
         },
         {
             "Effect": "Allow",
@@ -183,6 +177,10 @@ Function Name   |  Runtime
 TriggerCopyFunctions | Python 3.7
 
 ### Role
+
+Permissions > Create role with basic Lambda permissions > Create Function. &nbsp;
+
+In the dashboard of the function : Execution Role > View the {...} role > Add Inline policy > JSON > *CopyPaste these permissions*
 
 This function needs a Role with at least these permissions : (Replace us-west-1 by the region where these functions are deployed)
 

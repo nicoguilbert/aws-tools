@@ -16,8 +16,8 @@ import botocore
 
 COPY_DEFINITIONS = [
     {
-        "Source" : "us-west-1",
-        "Destination" : "us-west-2"
+        "Source" : "us-east-2",
+        "Destination" : "us-east-1"
     }#,
     #{
     #   "Source" : "us-west-2",
@@ -28,13 +28,17 @@ COPY_DEFINITIONS = [
 
 ACCOUNT = "728679744102"
 
-# How many days do you want to keep the snapshots
-DAYS_OF_RETENTION = 14
+#SysAdmin-AWS@doxcelerate.com
+EMAIL_SENDER = "SysAdmin-AWS@doxcelerate.com"
+EMAIL_RECIPIENT = "SysAdmin-AWS@doxcelerate.com"
 
-EMAIL_SENDER = "nicolasguilbert.tours@gmail.com"
-EMAIL_RECIPIENT = "nicolasguilbert.tours@gmail.com"
-EMAIL_REGION = "us-west-2"
-TOPIC_ARN = "arn:aws:sns:us-west-1:728679744102:EmailsToSend"
+EMAIL_REGION = "us-east-1"
+TOPIC_ARN = "arn:aws:sns:us-east-1:728679744102:EmailsToSend"
+
+EC2_RESOURCE = boto3.resource('ec2')
+
+SNS = boto3.resource('sns')
+EMAIL_TOPIC = SNS.Topic(TOPIC_ARN)
 
 ######################################################################################
 # Boto3 documentation.
@@ -46,6 +50,12 @@ TOPIC_ARN = "arn:aws:sns:us-west-1:728679744102:EmailsToSend"
 
 def delete_rule(context):
         events_client = boto3.client('events') 
+        lambda_client = boto3.client('lambda')
+
+        lambda_client.remove_permission(
+            FunctionName=context.function_name,
+            StatementId="{0}-Event".format(context.function_name)
+        )
         events_client.remove_targets( 
             Rule="{0}-Trigger".format(context.function_name), 
             Ids=[ 
@@ -55,7 +65,32 @@ def delete_rule(context):
         events_client.delete_rule( 
             Name="{0}-Trigger".format(context.function_name) 
         )
-        
+
+def my_send_email(subject, message): 
+    print ("DOX-INFO : Sending email.") 
+    try: 
+        EMAIL_TOPIC.publish( 
+            Subject = subject, 
+            Message = message 
+        ) 
+        print ("DOX-INFO : Email sent.") 
+    except Exception as err: 
+        print (err) 
+
+def handle_error(email_subject, resource_type, resource_info, action, region, error):
+    my_send_email(
+        subject = email_subject,
+        message = r"""
+            {
+                "sender": "Sender Name  <%s>",
+                "recipient":"%s",
+                "aws_region":"%s",
+                "body": "Resource Type : %s \nResource : %s \nRegion : %s \nAction : %s \nError : %s"
+            }
+        """ % (EMAIL_SENDER, EMAIL_RECIPIENT, EMAIL_REGION, resource_type, resource_info, region, action, error)
+    )
+    print("DOX-ERROR : Resource Type : %s . Resource Id : %s . Region : %s . Process : %s . Error : %s" % (resource_type, resource_info, region, action, error))
+
 class EC2WorkUnit(object):
     ''' This class represents a work unit for processing the copy of the snapshots on various regions.
     '''
@@ -64,267 +99,176 @@ class EC2WorkUnit(object):
         self.region_source = region_source
         self.region_dest = region_dest
 
-        self.aws_account = ACCOUNT
-        self.email_sender = EMAIL_SENDER
-        self.email_recipient = EMAIL_RECIPIENT
-        self.email_region = EMAIL_REGION
-
         self.ec2_source = boto3.client('ec2', region_name=region_source)
         self.ec2_dest = boto3.client('ec2', region_name=region_dest)
-        self.ec2_resource = boto3.resource('ec2')
-        self.sns = boto3.resource('sns')
-        self.email_topic = self.sns.Topic(TOPIC_ARN)
         
         self.snapshots = []
         self.init_snapshots_list()
-
-    def send_email(self, subject, message):
-        print ("Sending email.")
-        self.email_topic.publish(
-                Subject = subject,
-                Message = message
-            )
-        print ("Email sent.")
-    
-    def handle_error(self, email_subject, resource_type, resource_info, action, region, error):
-        self.send_email(
-            subject = email_subject,
-            message = """
-                {
-                    "sender": "Sender Name  <%s>",
-                    "recipient":"%s",
-                    "aws_region":"%s",
-                    "body": "Resource Type : %s || Resource : %s || Region : %s || Action : %s || Error : %s"
-                }
-            """ % (self.email_sender, self.email_recipient, self.email_region, resource_type, resource_info, region, action, error)
-        )
-        print("Resource Type : %s .\n Resource Id : %s .\n Region : %s .\n Process : %s .\n Error : %s" % (resource_type, resource_info, region, action, error))
 
     def sort_snapshots_by_time(self, snapshots):
         snapshots.sort(key=lambda r:r["StartTime"] , reverse=True)
         return snapshots
 
     def get_snapshots_on_region_source(self):
+        # https://boto3.amazonaws.com/v1/documentation/api/1.9.42/reference/services/ec2.html#EC2.Client.describe_snapshots
         response = self.ec2_source.describe_snapshots(
             Filters=[{ 'Name': 'status', 'Values': ['completed']}],
             OwnerIds=[
-                self.aws_account,
+                ACCOUNT,
             ],
         )
         return response["Snapshots"]
 
     def init_snapshots_list(self):
         nb_snapshot_to_copy = 0
-        snapshots = self.get_snapshots_on_region_source()       
+        snapshots = self.get_snapshots_on_region_source()
         snapshots_sorted = self.sort_snapshots_by_time(snapshots)
 
         for snapshot in snapshots_sorted:
-            #start = time.time()
-            s = MyEbsSnapshot(snapshot["SnapshotId"], self.region_source)
-            #end = time.time()
-            #print(s.id)
-            #print(end - start)        
-            if s.is_copied == False:
+            if MyEbsSnapshot.is_copied(snapshot["SnapshotId"]) == False:
+                s = MyEbsSnapshot(snapshot["SnapshotId"], self.region_source)
                 self.snapshots.append(s)
                 nb_snapshot_to_copy = nb_snapshot_to_copy + 1
-            if nb_snapshot_to_copy == 5:
+            else:
+                continue
+                
+            if nb_snapshot_to_copy == 10:
                 break
-
-        print(str(nb_snapshot_to_copy) + " EBS snapshots about to be copied from " + self.region_source)
+            
+        print("DOX-START : " + str(nb_snapshot_to_copy) + " EBS snapshots about to be copied from " + self.region_source)
         return nb_snapshot_to_copy
     
     # Returns the id of the snapshot just created
     def copy_snapshot(self, old_snapshot):
-        print ("Started copying.. snapshot_id: " + old_snapshot.id + ", from: " + self.region_source + ", to: " + self.region_dest)
 
         try:
+            print ("DOX-START: Copying.. snapshot_id: " + old_snapshot.id + ", from: " + self.region_source + ", to: " + self.region_dest)
             copy_response = self.ec2_dest.copy_snapshot(
-                Description = old_snapshot.get_new_snapshot_description(),
+                Description = old_snapshot.get_description_for_new_snapshot(),
                 SourceRegion = self.region_source,
                 SourceSnapshotId = old_snapshot.id,
                 DryRun=False
             )
             new_id = copy_response["SnapshotId"]
-            ec2_resource = boto3.resource('ec2')
             new_snapshot = MyEbsSnapshot(new_id, self.region_dest)
             new_snapshot.copy_tags_from_old(old_snapshot)
-            return new_snapshot.id
+            print("DOX-SUCCESS: Snapshot " + str(old_snapshot.id) + " successfully copied")
+            return True
+        
+        except botocore.exceptions.ClientError as e:
+            # 5 snapshot limit reached
+            if e.response['Error']['Code'] == "ResourceLimitExceeded":
+                raise e
+            # For every other clienterror 
+            else:
+                print(e)
+                handle_error( email_subject="EBS Snapshot copy failed", resource_type="EBS Snapshot", resource_info=old_snapshot.id, region=self.region_source, action= "Copy cross region",  error=str(e) )
+                return False
 
-        except botocore.exceptions.ClientError as err:
-            print("5 SNAPSHOTS LIMIT REACHED. " + str(err)) 
-            return "CopyLimitException"
-
-        except Exception as err:
-            self.handle_error(
-                email_subject="EBS Snapshot copy failed",
-                resource_type="EBS Snapshot", 
-                resource_info=old_snapshot.id, 
-                region=self.region_source,  
-                action= "Copy cross region", 
-                error=err
-            )
-            print(err)
-            return "Error"
+        except Exception as e:
+            print(e)
+            handle_error( email_subject="EBS Snapshot copy failed", resource_type="EBS Snapshot", resource_info=old_snapshot.id, region=self.region_source, action= "Copy cross region",  error=str(e) )
+            return False
 
     def copy_snapshots(self):
         nb_snapshots_copied = 0
 
         for snapshot in self.snapshots:
-            copy_response = self.copy_snapshot(snapshot)
-
-            if copy_response == "CopyLimitException":
-                print("Copy limit exception catched. Interruption.")
-                return copy_response
-
-            elif copy_response == "Error":
-                print("An error occured.")
-                continue
-
-            else:
-                print("Snapshot " + str(snapshot.id) + " successfully copied to snapshot " + str(copy_response))
+            try:
+                copy_response = self.copy_snapshot(snapshot)
+                if copy_response == False:
+                    continue
                 nb_snapshots_copied = nb_snapshots_copied + 1
+        
+            except Exception as e:
+                print("DOX-INFO: " + str(nb_snapshots_copied) + " snapshots copied")
+                raise e
 
-        print("No more snapshots to copy on " + self.region_source) 
+        print("DOX-INFO : " + str(nb_snapshots_copied) + " snapshots copied.")
+        print("DOX-FINAL RESULT : No more snapshots to copy on " + self.region_source) 
         return 0
 
 class MyEbsSnapshot(object):
-    ''' This class is an extension of the boto3 Snapshot class allowing actions on these snapshots on AWS
+    ''' This class is an extension of the boto3 Snapshot class allowing actions on these snapshots on AWS.
     '''
 
-    def __init__(self, snapshot_id, region, just_created = False):
-        self.ec2_resource = boto3.resource('ec2')
+    def __init__(self, snapshot_id, region):
         self.ec2_client = boto3.client('ec2', region_name = region)
         self.region = region
-        self.aws_snapshot_interface = self.ec2_resource.Snapshot(snapshot_id) 
+
+        self.aws_snapshot_interface = EC2_RESOURCE.Snapshot(snapshot_id) 
         self.id = snapshot_id
-        
-        self.tags = []
+        self.instance_name = ""
+
         self.init_tags()
+        
+    @staticmethod
+    def is_copied(snapshot_id):
+        pattern = re.compile("^sc-")
 
-        self.snapshot_name = ""
-        self.init_snapshot_name()
+        snapshot = EC2_RESOURCE.Snapshot(snapshot_id) 
+        try:
+            for tag in snapshot.tags:
+                # Checking if it is a destination snapshot (a copy)
+                if tag['Key'] == 'Name':
+                    test_match = pattern.match(tag['Value'])
+                    if test_match != None:
+                        return True
+        
+                # Checking if it is a source snapshot and if it has already been copied
+                if tag['Key'] == 'BackupCrossRegion' and tag['Value'] == 'Done':
+                    return True
+        except:
+            pass
+        return False
 
-        self.is_copied = self.is_copied()
-
-        self.start_time = ""
-        self.volume_id = ""
-
-        if self.is_copied == False:
-            self.init_start_time()
-            self.init_volume_id()
+    # init_tags() makes sure there is at least one tag 
+    def init_tags(self):
+        try:
+            if self.aws_snapshot_interface.tags == []:
+                self.create_tag("BackupCrossRegion", "Waiting")
+            
+            if (next((item for item in self.aws_snapshot_interface.tags if item['Key'] == 'BackupCrossRegion'), False) == False):
+                self.create_tag('BackupCrossRegion', 'Waiting')
+        
+        except Exception as err:
+            pass
 
     def create_tag(self, key, value):
-        print ("Creating tag - " + key + ":" + value + ", snapshot_id: " + str(self.id))
+        #print ("Creating tag - " + key + ":" + value + ", snapshot_id: " + str(self.id))
         self.ec2_client.create_tags(
             Resources=[ self.id ], 
             Tags=[{'Key': key, 'Value':value},] 
         )
-        # Updates tags attribute
-        self.tags.append({'Key': key, 'Value':value})
 
     def delete_tag(self, key, value):
-        print ("Deleting tag - " + key + ":" + value + ", snapshot_id: " + str(self.id))
+        #print ("Deleting tag - " + key + ":" + value + ", snapshot_id: " + str(self.id))
         self.ec2_client.delete_tags(
             Resources=[ self.id ], 
             Tags=[{'Key': key, 'Value':value},] 
         )
-        # Updates tags attribute
-        self.tags = [t for t in self.tags if not (t['Key'] == key and t['Value'] == value)]
-
-    def init_snapshot_name(self):
-        name = ""
-        try:
-            for tag in self.tags:
-                if tag["Key"] == "Name":
-                    name = tag["Value"]
-        except Exception as err:
-            print(err + " - tag issue")
-            name = "NameUndefined"
-        if name == "":
-            name = "Ec2Name404"
-        self.snapshot_name = name
-
-    def init_tags(self):
-        try:
-            self.tags = self.tags + self.aws_snapshot_interface.tags
-        except Exception as err:
-            print("init_tags() error :")
-            print(err)
-
-        if self.tags == []:
-            self.create_tag("BackupCrossRegion", "Waiting")
-        
-        if (next((item for item in self.tags if item['Key'] == 'BackupCrossRegion'), False) == False):
-            self.create_tag('BackupCrossRegion', 'Waiting')
-    
-    def init_start_time(self):
-        try:
-            self.start_time = self.aws_snapshot_interface.start_time
-        except:
-            print("init_start_time() error. No problem.")
-            #if start_time is unavailable, we init it with current time
-            self.start_time = datetime.now().strftime("%Y-%m-%d-%Hh%Mm")
-        
-        #return self.start_time
-    
-    def init_volume_id(self):
-        try:
-            self.volume_id = self.aws_snapshot_interface.volume_id
-        except:
-            print("init_volume_id() error. No problem.")
-            self.volume_id = "VolumeID not available."
-        
-        #return self.volume_id
-
-    def add_tags(self, tags):
-        response_tags = self.ec2_client.create_tags(
-                Resources=[ str(self.id) ],
-                Tags=tags
-            )
-        return response_tags
-
+                    
     def copy_tags_from_old(self, old_snapshot):
         #Copying tags from original snapshot to new snapshot
-        try:
-            tag = self.add_tags(old_snapshot.tags)
-        except:
-            self.create_tag('IssueWithTags', 'Colon')
-            print ("This snapshot might contain tags starting by 'aws:'. No way to handle them.")
-            print (self.id)
-        
-        # if there was a tag "Name"
-        if old_snapshot.snapshot_name != "NameUndefined":
-            self.delete_tag('Name', self.snapshot_name)
-        # if the value of the tag "Name" was empty
-        if old_snapshot.snapshot_name == "":
-            self.snapshot_name = "NameEmpty"
+
+        for tag in old_snapshot.aws_snapshot_interface.tags:
+            try:
+                self.create_tag(tag["Key"], tag["Value"])
+            except:
+                continue
     
-        copy_name = "sc-" + old_snapshot.snapshot_name + "-" + old_snapshot.start_time.strftime("%Y-%m-%d-%Hh%Mm")
+        self.delete_tag('BackupCrossRegion', 'Waiting')
+
+        copy_name = "sc-" + old_snapshot.instance_name + "-" + old_snapshot.aws_snapshot_interface.start_time.strftime("%Y-%m-%d-%Hh%Mm")
     
         self.create_tag('Name', copy_name)
         self.create_tag('SnapshotType', 'AutomatedCopyCrossRegion')
         self.create_tag('OriginalSnapshotID', old_snapshot.id)
     
-        print("Successfully copyied.. snapshot_id: " + old_snapshot.id + ", from: " + old_snapshot.region + ", to: " + self.region)
-    
         old_snapshot.delete_tag('BackupCrossRegion', 'Waiting')
         old_snapshot.create_tag('BackupCrossRegion', 'Done')
 
         return self.id
-
-    def is_copied(self):
-        pattern = re.compile("^sc-")
-                
-        test_match = pattern.match(self.snapshot_name)
-        if test_match != None:
-            return True
-        
-        for t in self.tags:
-            # If the snapshot has already been copied
-            if t['Key'] == 'BackupCrossRegion' and t['Value'] == 'Done':
-                return True
-        
-        return False
     
     def get_snapshot_description(self):
         try:
@@ -334,70 +278,78 @@ class MyEbsSnapshot(object):
         return description
 
     def get_volume_attachments(self, volume_id):
-        try:
-            response = self.ec2_client.describe_volumes( 
-                VolumeIds=[ volume_id, ],
-            )
-            volume = self.ec2_resource.Volume(volume_id)
-            return volume.attachments
-        except Exception as err:
-            print(err)
-            print ("The volume " + volume_id + " cannot be found. Must have been deleted.")
-            return False
+        response = self.ec2_client.describe_volumes( 
+            VolumeIds=[ volume_id, ],
+        )
+        volume = EC2_RESOURCE.Volume(volume_id)
+        if volume.attachments == []:
+            attachments = []
+            attachments[0] = {}
+            attachments[0]["InstanceId"] = "Undefined"
+            attachments[0]["Device"] = "NotFound"
+        else:
+            attachments = volume.attachments 
+        return attachments
 
-    def get_instance_name(self, instance_id):
-        instance = self.ec2_resource.Instance(instance_id)
+    def init_instance_name(self, instance=None):
         instance_name = ""
+        try:
+            for tag in instance.tags:
+                if tag["Key"] == "Name":
+                    instance_name = tag["Value"]
+        except:
+            instance_name = "Ec2NotFound"
+        else:
+            if instance_name == "":
+                instance_name = "Ec2NameUndefined"
 
-        for tag in instance.tags:
-            if tag["Key"] == "Name":
-                instance_name = tag["Value"]
-
-        if instance_name == "":
-            instance_name = "Ec2NameUndefined"
-
-        return instance_name
-        
-    def get_new_snapshot_description(self):
+        self.instance_name = instance_name
+    
+    # Builds the description for the copy/new snapshot on destination region
+    def get_description_for_new_snapshot(self):
         new_description = ""
-        
-        if self.volume_id == "vol-ffffffff":
-            new_description = "Couldn't find attachements."
-        else: 
-            # Puts a list in attachments. The list only contains one element
-            # Or contains a string
-            attachments = self.get_volume_attachments(self.volume_id)
-            if attachments == False:
-                new_description = "Volume did not exist. Could not find attachements."
-            elif attachments == []:
-                new_description = new_description + "Volume not attached/deleted." + " RegionSource: " + self.region
-            else:
-                # Puts a dictionnary containing the volume informations inside volume_dict
-                volume_dict = attachments[0]
-                instance_name = "Ec2Name: " + self.get_instance_name(volume_dict["InstanceId"])
-                block_device = ", BlockDevice: " + volume_dict["Device"]
-                new_description = new_description + instance_name + block_device + ", RegionSource: " + self.region
+        try:
+            # If the volume_id is valid it will return information about the ec2
+            # or initialize attachments with defaults values.
+            attachments = self.get_volume_attachments(self.aws_snapshot_interface.volume_id)
+        except:
+            # default values if volume_id is not valid
+            attachments = []
+            attachments[0] = {}
+            attachments[0]["InstanceId"] = "Undefined"
+            attachments[0]["Device"] = "NotFound"
+                
+        #print(attachments)
+        try:
+            ec2_instance = EC2_RESOURCE.Instance(attachments[0]["InstanceId"])
+        except:
+            #init the instance name with a default value.
+            self.instance_name = "Ec2NotFound"                
+            ec2_instance_type = "NotFound"
+        else:
+            self.init_instance_name(ec2_instance)                
+            ec2_instance_type = ec2_instance.instance_type
 
+        new_description = new_description + "Ec2Name: " + self.instance_name + ", BlockDevice: " + attachments[0]["Device"] + ", InstanceType: " + ec2_instance_type
+
+        #print(new_description)
         return new_description
             
 def lambda_handler(event, context):
+    # rule => CloudWatch Rule triggering this function every x minutes
     delete_rule_flag = True
 
-    for copy_order in COPY_DEFINITIONS:
-        work_unit = EC2WorkUnit(copy_order["Source"], copy_order["Destination"])
+    for copy_definition in COPY_DEFINITIONS:
+        work_unit = EC2WorkUnit(copy_definition["Source"], copy_definition["Destination"])  
         
-        work_unit.init_snapshots_list()
-        copy_response = work_unit.copy_snapshots()
-        #print(copy_response)
+        try:
+            copy_response = work_unit.copy_snapshots()
 
-        if copy_response == "CopyLimitException":
-            delete_rule_flag = False
+        except botocore.exceptions.ClientError as e:
+            # If the limit of snapshot copies is reached :
+            if e.response['Error']['Code'] == "ResourceLimitExceeded":
+                delete_rule_flag = False
 
     if delete_rule_flag == True:
         delete_rule(context)
-
-
-
-
-
-
+        print("DOX-Rule deleted.")
